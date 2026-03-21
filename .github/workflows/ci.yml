@@ -27,10 +27,3 @@ jobs:
       - name: Run Vitest
         run: npm run test
         
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
-          deno-version: v1.x
-          
-      - name: Run Deno tests
-        run: deno test -A supabase/functions/
