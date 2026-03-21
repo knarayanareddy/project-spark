@@ -96,7 +96,8 @@ export default function BriefingBuilder() {
   const toggleModule = (id: ModuleId) => {
     setEnabledModules(prev => {
       const next = new Set(prev);
-      if (next.has(id)) {
+      const isEnabled = next.has(id);
+      if (isEnabled) {
         next.delete(id);
       } else {
         next.add(id);
