@@ -4,7 +4,7 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { ActionCard } from "@/components/ActionCard";
 import { DebugPanel } from "@/components/DebugPanel";
 import { SegmentPlaylist } from "@/components/SegmentPlaylist";
-import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, assembleUserData, type SegmentStatus } from "@/lib/api";
+import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, assembleUserData, getProfiles, upsertProfile, type SegmentStatus, type BriefingProfile } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { mockUserPreferences, mockUserData, mockScriptJson } from "@/lib/mockData";
 import { Loader2, Play, Clapperboard, Database, Zap, AlertCircle, Share2, Link } from "lucide-react";
@@ -29,6 +29,11 @@ export default function Index() {
   const demoAuthMode = import.meta.env.VITE_DEMO_AUTH_MODE || "internal_key";
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [profiles, setProfiles] = useState<BriefingProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
+    localStorage.getItem("selectedProfileId") === "mock-default" ? null : (localStorage.getItem("selectedProfileId") || null)
+  );
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setHasSession(!!session);
@@ -40,6 +45,30 @@ export default function Index() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (hasSession || apiKey) {
+      if (apiKey) setInternalApiKey(apiKey);
+      getProfiles().then(setProfiles).catch(console.error);
+    }
+  }, [hasSession, apiKey]);
+
+  const handleCreateProfile = async (name: string) => {
+    try {
+      if (!apiKey && !hasSession) throw new Error("Authentication required to create profiles");
+      if (apiKey) setInternalApiKey(apiKey);
+      const newProfile = await upsertProfile({ 
+        name, 
+        enabled_modules: ["ai_news_delta", "weather"], 
+        module_settings: {} 
+      });
+      setProfiles(prev => [newProfile, ...prev]);
+      setSelectedProfileId(newProfile.id);
+      localStorage.setItem("selectedProfileId", newProfile.id);
+    } catch (e: any) {
+      addError("Failed to create profile: " + e.message);
+    }
+  };
 
   const addError = (e: string) => setErrors((prev) => [...prev, e]);
 
@@ -211,6 +240,28 @@ export default function Index() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 border-r border-border pr-3 mr-1">
+            <select
+              className="h-9 px-3 text-xs rounded-md bg-secondary border border-border text-foreground font-mono focus:ring-1 focus:ring-primary outline-none"
+              value={selectedProfileId || "mock-default"}
+              onChange={(e) => {
+                if (e.target.value === "CREATE_NEW") {
+                  const name = window.prompt("Enter new profile name:");
+                  if (name) handleCreateProfile(name);
+                } else {
+                  setSelectedProfileId(e.target.value === "mock-default" ? null : e.target.value);
+                  localStorage.setItem("selectedProfileId", e.target.value);
+                }
+              }}
+            >
+              <option value="mock-default">Mock / Default</option>
+              {profiles.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+              <option value="CREATE_NEW">+ Create Profile</option>
+            </select>
+          </div>
+
           {!useMock && !hasSession && demoAuthMode === "internal_key" && (
             <div className="relative">
               <input

@@ -104,3 +104,25 @@ export async function syncGithub() {
 export async function assembleUserData() {
   return callEdgeFunction<{ user_data: unknown; meta: unknown }>("assemble-user-data", {});
 }
+
+export interface BriefingProfile {
+  id: string;
+  name: string;
+  persona: string | null;
+  timezone: string | null;
+  enabled_modules: string[];
+  module_settings: Record<string, any>;
+  updated_at: string;
+}
+
+export async function getProfiles() {
+  return callEdgeFunction<BriefingProfile[]>("get-profiles", { method: "GET" });
+}
+
+export async function upsertProfile(profile: Partial<BriefingProfile>) {
+  return callEdgeFunction<BriefingProfile>("upsert-profile", { body: profile });
+}
+
+export async function deleteProfile(id: string) {
+  return callEdgeFunction<{ success: boolean }>("delete-profile", { body: { id } });
+}
