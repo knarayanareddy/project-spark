@@ -69,6 +69,14 @@ export interface SegmentStatus {
 
 export interface JobStatusResponse {
   status: string;
+  progress?: {
+    total: number;
+    queued: number;
+    rendering: number;
+    complete: number;
+    failed: number;
+    percent_complete: number;
+  };
   segments: SegmentStatus[];
 }
 
@@ -76,5 +84,11 @@ export async function getJobStatus(jobId: string) {
   return callEdgeFunction<JobStatusResponse>("job-status", {
     method: "GET",
     params: { job_id: jobId },
+  });
+}
+
+export async function triggerRenderWorker(jobId: string, maxSegments: number = 1) {
+  return callEdgeFunction<{ ok: boolean; status: string }>("render-worker", {
+    body: { job_id: jobId, max_segments: maxSegments },
   });
 }

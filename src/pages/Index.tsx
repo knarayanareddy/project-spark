@@ -4,7 +4,8 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { ActionCard } from "@/components/ActionCard";
 import { DebugPanel } from "@/components/DebugPanel";
 import { SegmentPlaylist } from "@/components/SegmentPlaylist";
-import { generateScript, startRender, getJobStatus, setInternalApiKey, type SegmentStatus } from "@/lib/api";
+import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, type SegmentStatus } from "@/lib/api";
+import { supabase } from "@/integrations/supabase/client";
 import { mockUserPreferences, mockUserData, mockScriptJson } from "@/lib/mockData";
 import { Loader2, Play, Clapperboard, Database, Zap, AlertCircle } from "lucide-react";
 
@@ -17,10 +18,12 @@ export default function Index() {
   const [scriptJson, setScriptJson] = useState<any>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [progress, setProgress] = useState<any>(null);
   const [segments, setSegments] = useState<SegmentStatus[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState("");
+  const [isResuming, setIsResuming] = useState(false);
   const [hasSession, setHasSession] = useState(false);
   const demoAuthMode = import.meta.env.VITE_DEMO_AUTH_MODE || "internal_key";
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -131,6 +134,7 @@ export default function Index() {
             const status = await getJobStatus(res.job_id);
             setJobStatus(status.status);
             setSegments(status.segments);
+            if (status.progress) setProgress(status.progress);
             
             if (status.status === "complete" || status.status === "failed") {
               if (pollRef.current) clearInterval(pollRef.current);
@@ -147,6 +151,22 @@ export default function Index() {
       setState("script_ready");
     }
   }, [scriptId, useMock, segments, apiKey]);
+
+  const handleResume = useCallback(async () => {
+    if (!jobId || useMock) return;
+    setIsResuming(true);
+    try {
+      await triggerRenderWorker(jobId, 1);
+      // Restart polling if not active
+      if (!pollRef.current) {
+        handleRender(); // Reuse handleRender logic to start polling
+      }
+    } catch (e: any) {
+      addError("Resume failed: " + e.message);
+    } finally {
+      setIsResuming(false);
+    }
+  }, [jobId, useMock, handleRender]);
 
   useEffect(() => {
     return () => {
@@ -279,6 +299,40 @@ export default function Index() {
             </div>
           ) : (
             <div className="w-full max-w-4xl flex flex-col items-center animate-in fade-in duration-500">
+              {/* Progress UI */}
+              {state === "rendering" && progress && (
+                <div className="w-full mb-6 space-y-2">
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-xs font-semibold text-primary uppercase tracking-tighter">
+                      Rendering Media: {progress.complete} / {progress.total}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-foreground">
+                        {progress.percent_complete}%
+                      </span>
+                      {jobStatus === "failed" && !useMock && (
+                        <Button 
+                          size="xs" 
+                          variant="outline" 
+                          onClick={handleResume} 
+                          disabled={isResuming}
+                          className="h-6 px-2 text-[10px] bg-primary/5 border-primary/20 hover:bg-primary/10"
+                        >
+                          {isResuming ? <Loader2 className="w-2.5 h-2.5 animate-spin mr-1" /> : <Zap className="w-2.5 h-2.5 mr-1" />}
+                          Resume Render
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden border border-border/50">
+                    <div 
+                      className="h-full bg-primary transition-all duration-700 ease-out"
+                      style={{ width: `${progress.percent_complete}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="w-full relative rounded-2xl overflow-hidden shadow-2xl border border-border bg-black aspect-video">
                 <VideoPlayer
                   videoUrl={currentSegment?.avatar_video_url || null}
