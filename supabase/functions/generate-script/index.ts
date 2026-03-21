@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { config, validateConfig } from "../_shared/config.ts";
+import { sanitizeUserData } from "../_shared/sanitize.ts";
+import { validateBriefingScript } from "../_shared/briefingSchema.ts";
+
+validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,7 +29,7 @@ Your output MUST be valid JSON matching this exact schema:
       "runware_b_roll_prompt": "Image generation prompt or null",
       "ui_action_card": {
         "is_active": boolean,
-        "card_type": "calendar_join|link_open|email_reply|jira_open|github_review|weather_widget" (if active),
+        "card_type": "calendar_join|link_open|email_reply|jira_open|github_review|weather_widget",
         "title": "string",
         "description": "string",
         "action_label": "string",
@@ -59,8 +64,7 @@ serve(async (req) => {
 
   // Auth check
   const internalKey = req.headers.get("x-internal-api-key");
-  const expectedKey = Deno.env.get("INTERNAL_API_KEY");
-  if (!expectedKey || internalKey !== expectedKey) {
+  if (!config.INTERNAL_API_KEY || internalKey !== config.INTERNAL_API_KEY) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -70,31 +74,26 @@ serve(async (req) => {
   try {
     const { user_preferences, user_data } = await req.json();
 
+    // 1. Sanitize user data
+    const sanitizedData = sanitizeUserData(user_data);
+
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      config.SUPABASE_URL!,
+      config. SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Redact any potential secrets from user_data
-    let sanitizedData = JSON.stringify(user_data);
-    const secretPatterns = [/sk-[a-zA-Z0-9]{20,}/g, /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g];
-    for (const pattern of secretPatterns) {
-      sanitizedData = sanitizedData.replace(pattern, "[REDACTED]");
-    }
-
-    const openaiKey = Deno.env.get("OPENAI_API_KEY");
     let scriptJson;
 
-    if (openaiKey) {
+    if (config.OPENAI_API_KEY) {
       const prompt = DEVELOPER_PROMPT_TEMPLATE
         .replace("{user_preferences}", JSON.stringify(user_preferences, null, 2))
-        .replace("{user_data}", sanitizedData);
+        .replace("{user_data}", JSON.stringify(sanitizedData, null, 2));
 
       const llmResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiKey}`,
+          Authorization: `Bearer ${config.OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
           model: "gpt-4o-mini",
@@ -114,42 +113,37 @@ serve(async (req) => {
       const llmData = await llmResponse.json();
       scriptJson = JSON.parse(llmData.choices[0].message.content);
     } else {
-      // Fallback: generate a basic script from the data
-      scriptJson = generateFallbackScript(user_preferences, JSON.parse(sanitizedData));
+      // Fallback
+      scriptJson = generateFallbackScript(user_preferences, sanitizedData);
     }
 
-    // Validate
-    if (!scriptJson.timeline || !Array.isArray(scriptJson.timeline)) {
-      throw new Error("Invalid script: missing timeline array");
-    }
-    if (scriptJson.briefing_metadata?.total_estimated_segments !== scriptJson.timeline.length) {
-      scriptJson.briefing_metadata.total_estimated_segments = scriptJson.timeline.length;
-    }
-    for (let i = 0; i < scriptJson.timeline.length; i++) {
-      if (scriptJson.timeline[i].segment_id !== i + 1) {
-        scriptJson.timeline[i].segment_id = i + 1;
-      }
-      if (!scriptJson.timeline[i].grounding_source_id) {
-        scriptJson.timeline[i].grounding_source_id = "system";
-      }
+    // 2. Strict Validation
+    const validation = validateBriefingScript(scriptJson);
+    if (!validation.ok) {
+      console.error("Script validation failed:", validation.error);
+      return new Response(JSON.stringify({ error: "LLM output validation failed", details: validation.error }), {
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Save to DB
+    // 3. Persist to DB
     const { data, error } = await supabase
       .from("briefing_scripts")
       .insert({
         persona: user_preferences?.persona || "default",
-        script_json: scriptJson,
+        script_json: validation.data,
       })
       .select("id")
       .single();
 
     if (error) throw error;
 
-    return new Response(JSON.stringify({ script_id: data.id, script_json: scriptJson }), {
+    return new Response(JSON.stringify({ script_id: data.id, script_json: validation.data }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (e) {
+  } catch (e: any) {
+    console.error("generate-script error:", e.message);
     return new Response(JSON.stringify({ error: e.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -169,27 +163,6 @@ function generateFallbackScript(prefs: any, data: any) {
     runware_b_roll_prompt: null,
     ui_action_card: { is_active: false },
   });
-
-  if (data.calendar_events?.length) {
-    const events = data.calendar_events.map((e: any) => e.title).join(", ");
-    timeline.push({
-      segment_id: segId++,
-      segment_type: "calendar_overview",
-      dialogue: `You have ${data.calendar_events.length} events today: ${events}.`,
-      grounding_source_id: data.calendar_events.map((e: any) => e.id).join(","),
-      runware_b_roll_prompt: null,
-      ui_action_card: data.calendar_events[0]?.join_url
-        ? {
-            is_active: true,
-            card_type: "calendar_join",
-            title: data.calendar_events[0].title,
-            description: data.calendar_events[0].location,
-            action_label: "Join",
-            action_payload: data.calendar_events[0].join_url,
-          }
-        : { is_active: false },
-    });
-  }
 
   timeline.push({
     segment_id: segId++,

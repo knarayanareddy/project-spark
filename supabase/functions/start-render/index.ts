@@ -1,5 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { config, validateConfig } from "../_shared/config.ts";
+import { generateBrollImage } from "../_shared/providers/runware.ts";
+import { FalAvatarProvider } from "../_shared/providers/falAvatar.ts";
+import { VeedAvatarProvider } from "../_shared/providers/veedAvatar.ts";
+import { AvatarProvider } from "../_shared/providers/types.ts";
+
+validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,8 +19,7 @@ serve(async (req) => {
   }
 
   const internalKey = req.headers.get("x-internal-api-key");
-  const expectedKey = Deno.env.get("INTERNAL_API_KEY");
-  if (!expectedKey || internalKey !== expectedKey) {
+  if (!config.INTERNAL_API_KEY || internalKey !== config.INTERNAL_API_KEY) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -24,11 +30,11 @@ serve(async (req) => {
     const { script_id } = await req.json();
 
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      config.SUPABASE_URL!,
+      config.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Fetch script
+    // 1. Fetch script
     const { data: script, error: scriptErr } = await supabase
       .from("briefing_scripts")
       .select("*")
@@ -40,7 +46,7 @@ serve(async (req) => {
     const timeline = (script.script_json as any).timeline;
     if (!timeline || !Array.isArray(timeline)) throw new Error("Invalid script timeline");
 
-    // Create render job
+    // 2. Create render job
     const { data: job, error: jobErr } = await supabase
       .from("render_jobs")
       .insert({ script_id, status: "rendering" })
@@ -49,7 +55,7 @@ serve(async (req) => {
 
     if (jobErr) throw jobErr;
 
-    // Create segment rows
+    // 3. Create segment rows
     const segmentRows = timeline.map((seg: any) => ({
       job_id: job.id,
       segment_id: seg.segment_id,
@@ -62,14 +68,19 @@ serve(async (req) => {
     const { error: segErr } = await supabase.from("rendered_segments").insert(segmentRows);
     if (segErr) throw segErr;
 
-    // Process segments sequentially
-    const runwareKey = Deno.env.get("RUNWARE_API_KEY");
-    const falKey = Deno.env.get("FAL_KEY");
-    const veedKey = Deno.env.get("VEED_API_KEY");
+    // 4. Initialize Provider
+    let avatarProvider: AvatarProvider;
+    if (config.AVATAR_PROVIDER === "veed" && config.VEED_API_KEY) {
+      avatarProvider = new VeedAvatarProvider();
+    } else {
+      avatarProvider = new FalAvatarProvider();
+    }
 
+    // 5. Process segments sequentially (Resilient Flow)
+    let completedCount = 0;
+    
     for (const seg of timeline) {
       try {
-        // Update status to rendering
         await supabase
           .from("rendered_segments")
           .update({ status: "rendering" })
@@ -78,44 +89,53 @@ serve(async (req) => {
 
         let bRollUrl = null;
         let avatarUrl = null;
+        let segmentError = null;
 
-        // Generate b-roll image via Runware
-        if (seg.runware_b_roll_prompt && runwareKey) {
-          try {
-            bRollUrl = await generateRunwareImage(runwareKey, seg.runware_b_roll_prompt);
-          } catch (e) {
-            console.error(`Runware failed for segment ${seg.segment_id}:`, e.message);
-          }
+        // B-Roll (Runware)
+        if (config.ENABLE_RUNWARE && seg.runware_b_roll_prompt && seg.segment_id <= config.MAX_BROLL_SEGMENTS) {
+          const res = await generateBrollImage({ prompt: seg.runware_b_roll_prompt });
+          bRollUrl = res.imageUrl;
+          if (res.error) console.warn(`Runware failed for segment ${seg.segment_id}:`, res.error);
         }
 
-        // Generate avatar video
-        if (veedKey) {
-          try {
-            avatarUrl = await generateVeedVideo(veedKey, seg.dialogue);
-          } catch (e) {
-            console.error(`VEED failed for segment ${seg.segment_id}, trying fal:`, e.message);
-          }
-        }
-
-        if (!avatarUrl && falKey) {
-          try {
-            avatarUrl = await generateFalVideo(falKey, seg.dialogue);
-          } catch (e) {
-            console.error(`fal failed for segment ${seg.segment_id}:`, e.message);
-          }
+        // Avatar Video
+        const res = await avatarProvider.generateAvatarVideo({
+          dialogue: seg.dialogue,
+          persona: script.persona,
+        });
+        
+        avatarUrl = res.videoUrl;
+        
+        // Fallback to fal if VEED failed
+        if (!avatarUrl && config.AVATAR_PROVIDER === "veed" && config.FAL_KEY) {
+          console.info(`VEED failed for segment ${seg.segment_id}, falling back to fal.ai`);
+          const falRes = await new FalAvatarProvider().generateAvatarVideo({
+            dialogue: seg.dialogue,
+            persona: script.persona,
+          });
+          avatarUrl = falRes.videoUrl;
+          if (falRes.error) segmentError = falRes.error;
+        } else if (res.error) {
+          segmentError = res.error;
         }
 
         // Update segment
+        const status = avatarUrl ? "complete" : "failed";
+        if (avatarUrl) completedCount++;
+
         await supabase
           .from("rendered_segments")
           .update({
-            status: "complete",
+            status,
             avatar_video_url: avatarUrl,
             b_roll_image_url: bRollUrl,
+            error: segmentError,
           })
           .eq("job_id", job.id)
           .eq("segment_id", seg.segment_id);
-      } catch (e) {
+
+      } catch (e: any) {
+        console.error(`Unexpected error in segment ${seg.segment_id}:`, e.message);
         await supabase
           .from("rendered_segments")
           .update({ status: "failed", error: e.message })
@@ -124,65 +144,22 @@ serve(async (req) => {
       }
     }
 
-    // Mark job complete
+    // 6. Mark job status
+    const finalStatus = completedCount > 0 ? "complete" : "failed";
     await supabase
       .from("render_jobs")
-      .update({ status: "complete" })
+      .update({ status: finalStatus })
       .eq("id", job.id);
 
-    return new Response(JSON.stringify({ job_id: job.id }), {
+    return new Response(JSON.stringify({ job_id: job.id, status: finalStatus }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (e) {
+
+  } catch (e: any) {
+    console.error("start-render error:", e.message);
     return new Response(JSON.stringify({ error: e.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
-
-async function generateRunwareImage(apiKey: string, prompt: string): Promise<string> {
-  const response = await fetch("https://api.runware.ai/v1", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify([{
-      taskType: "imageInference",
-      taskUUID: crypto.randomUUID(),
-      positivePrompt: prompt,
-      width: 800,
-      height: 450,
-      numberResults: 1,
-    }]),
-  });
-  if (!response.ok) throw new Error(`Runware API error: ${response.status}`);
-  const data = await response.json();
-  return data?.data?.[0]?.imageURL || null;
-}
-
-async function generateVeedVideo(apiKey: string, dialogue: string): Promise<string> {
-  // VEED Text-to-Avatar API (simplified)
-  const response = await fetch("https://api.veed.io/v1/generate/avatar", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ text: dialogue, avatar: "default" }),
-  });
-  if (!response.ok) throw new Error(`VEED API error: ${response.status}`);
-  const data = await response.json();
-  return data?.video_url || null;
-}
-
-async function generateFalVideo(apiKey: string, dialogue: string): Promise<string> {
-  // fal.ai text-to-video (simplified)
-  const response = await fetch("https://fal.run/fal-ai/sadtalker", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Key ${apiKey}` },
-    body: JSON.stringify({
-      source_image_url: "https://storage.googleapis.com/falserverless/model_tests/sadtalker/default_avatar.png",
-      driven_audio_url: null,
-      text: dialogue,
-    }),
-  });
-  if (!response.ok) throw new Error(`fal API error: ${response.status}`);
-  const data = await response.json();
-  return data?.video?.url || null;
-}

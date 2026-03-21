@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { config, validateConfig } from "../_shared/config.ts";
+
+validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,8 +15,7 @@ serve(async (req) => {
   }
 
   const internalKey = req.headers.get("x-internal-api-key");
-  const expectedKey = Deno.env.get("INTERNAL_API_KEY");
-  if (!expectedKey || internalKey !== expectedKey) {
+  if (!config.INTERNAL_API_KEY || internalKey !== config.INTERNAL_API_KEY) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -26,8 +28,8 @@ serve(async (req) => {
     if (!jobId) throw new Error("job_id is required");
 
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      config.SUPABASE_URL!,
+      config.SUPABASE_SERVICE_ROLE_KEY!
     );
 
     const { data: job, error: jobErr } = await supabase
@@ -50,7 +52,8 @@ serve(async (req) => {
       JSON.stringify({ status: job.status, segments: segments || [] }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (e) {
+  } catch (e: any) {
+    console.error("job-status error:", e.message);
     return new Response(JSON.stringify({ error: e.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
