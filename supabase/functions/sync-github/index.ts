@@ -3,6 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
 import { sanitizeDeep, redactSecrets } from "../_shared/sanitize.ts";
+import { stableSourceId } from "../_shared/stableId.ts";
+import { decryptString } from "../_shared/crypto.ts";
 
 validateConfig();
 
@@ -25,26 +27,37 @@ serve(async (req: Request) => {
   const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
-    // 1. Get GitHub Config (PAT and repos)
-    const { data: conn, error: connErr } = await supabase
-      .from("connector_connections")
-      .select("metadata")
+    // 1. Get GitHub Config (strictly encrypted token parsing ONLY)
+    const { data: connSecret, error: connErr } = await supabase
+      .from("connector_secrets")
+      .select("secret_ciphertext, secret_iv")
       .eq("user_id", userId)
       .eq("provider", "github")
       .single();
 
-    if (connErr || !conn?.metadata?.encrypted_pat) {
-      // For demo purposes, we might check connector_configs too if stored there
-      throw new Error("GitHub connection not found or PAT missing.");
+    if (connErr || !connSecret?.secret_ciphertext) {
+      return new Response(JSON.stringify({ error: "github_not_configured" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
-    // NOTE: In a real app, you'd decrypt the PAT here. 
-    // For this hackathon demo, we assume the 'encrypted_pat' is actually the PAT (labeled clearly in UI).
-    const pat = conn.metadata.encrypted_pat;
+    const pat = await decryptString(connSecret.secret_ciphertext, connSecret.secret_iv, config.CONNECTOR_SECRET_KEY!);
 
-    // 2. Fetch PRs assigned to user (or from specific repos)
-    // We'll use a simple search for PRs you're involved in
-    const ghResponse = await fetch("https://api.github.com/search/issues?q=is:pr+is:open+archived:false+involves:@me", {
+    // 2. Fetch User Login securely to resolve ambiguous search scopes
+    const userRes = await fetch("https://api.github.com/user", {
+      headers: {
+        "Authorization": `token ${pat}`,
+        "User-Agent": "Morning-Briefing-Bot"
+      }
+    });
+
+    if (!userRes.ok) throw new Error("Failed to validate GitHub identity.");
+    const userData = await userRes.json();
+    const login = userData.login;
+
+    // 3. Fetch PRs deterministically based on parsed identity
+    const query = `is:pr is:open archived:false review-requested:${login}`;
+    const ghResponse = await fetch(`https://api.github.com/search/issues?q=${encodeURIComponent(query)}&sort=updated&order=desc`, {
       headers: {
         "Authorization": `token ${pat}`,
         "Accept": "application/vnd.github.v3+json",
@@ -61,8 +74,9 @@ serve(async (req: Request) => {
     const syncedItems = [];
 
     for (const pr of prData.items) {
-      const externalId = pr.node_id;
-      const stableId = `gh_pr_${pr.number}_${btoa(pr.repository_url).slice(-8)}`;
+      const externalId = pr.node_id || pr.html_url;
+      if (!externalId) continue;
+      const stableId = await stableSourceId("pr", externalId);
 
       syncedItems.push({
         user_id: userId,
@@ -74,11 +88,12 @@ serve(async (req: Request) => {
         title: pr.title,
         author: pr.user.login,
         url: pr.html_url,
-        summary: pr.body?.slice(0, 500),
+        summary: sanitizeDeep(pr.body?.slice(0, 500) || "No description provided"),
         payload: sanitizeDeep({
           repo: pr.repository_url.split("/").slice(-2).join("/"),
-          status: pr.state,
-          labels: pr.labels.map((l: any) => l.name),
+          status: pr.state || "open",
+          author: pr.user?.login || "Unknown",
+          updated_at: pr.updated_at,
         }),
       });
     }

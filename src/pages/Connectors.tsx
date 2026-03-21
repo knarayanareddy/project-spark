@@ -79,23 +79,34 @@ export default function Connectors() {
   }
 
   async function saveGithubConnection() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    if (!githubPat || githubPat === "REDACTED_TOKEN_SAVED") return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error("User not authenticated.");
+        return;
+      }
+      if (!githubPat || githubPat === "REDACTED_TOKEN_SAVED") {
+        toast.error("Please enter a valid GitHub PAT.");
+        return;
+      }
 
-    const { error } = await (supabase as any)
-      .from("connector_connections")
-      .upsert({
-        user_id: user.id,
-        provider: "github",
-        status: "active",
-        metadata: { encrypted_pat: githubPat }
-      }, { onConflict: "user_id, provider" });
+      const { data, error } = await supabase.functions.invoke("set-connector-secret", {
+        body: { provider: "github", secret: githubPat },
+        headers: { "Authorization": `Bearer ${session?.access_token}` }
+      });
 
-    if (error) toast.error("Failed to save GitHub token");
-    else {
-      toast.success("GitHub PAT saved");
+      if (error || (data && data.error)) {
+        throw new Error(error?.message || data?.error || "Unknown error from function.");
+      }
+
+      toast.success("GitHub connected successfully", {
+        description: "Token is securely encrypted and stored server-side (never readable from the client)."
+      });
       setGithubPat("REDACTED_TOKEN_SAVED");
+    } catch (err: any) {
+      toast.error("Failed to save GitHub token", {
+        description: err.message || "An unexpected error occurred."
+      });
     }
   }
 

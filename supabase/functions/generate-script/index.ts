@@ -3,9 +3,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
 import { sanitizeDeep, redactSecrets, sanitizeUserData } from "../_shared/sanitize.ts";
-import { buildAllowedIds } from "../_shared/grounding.ts";
+import { buildAllowedIds, validateGroundingIds } from "../_shared/grounding.ts";
 import { planBriefing, SegmentPlan } from "../_shared/planner.ts";
 import { realizeSegment } from "../_shared/realizer.ts";
+import { BriefingSegmentSchema, validateBriefingScript } from "../_shared/briefingSchema.ts";
 import { AssembledUserData } from "../_shared/userData.ts";
 
 validateConfig();
@@ -39,7 +40,9 @@ serve(async (req) => {
     // 1. DETERMINISTIC PLANNER
     const segmentPlans = planBriefing(sanitizedData);
     if (segmentPlans.length === 0) {
-      throw new Error("No briefing content available. Please sync your connectors first.");
+      return new Response(JSON.stringify({ error: "no_content", message: "No briefing content available. Please sync your connectors first." }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
     // 2. LLM REALIZER (Per-segment)
@@ -56,20 +59,19 @@ serve(async (req) => {
 
       while (attempts < maxAttempts && !segment) {
         try {
-          const realized = await realizeSegment(plan, persona, config.OPENAI_API_KEY!);
+          const realized = await realizeSegment(i + 1, plan, persona, config.OPENAI_API_KEY!);
           
-          // Basic validation
-          if (!realized.dialogue) throw new Error("Missing dialogue");
+          // Schema validation
+          const parsed = BriefingSegmentSchema.parse(realized);
           
           // Grounding check
-          const segIds = (realized.grounding_source_id || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+          const segIds = (parsed.grounding_source_id || "").split(",").map((s: string) => s.trim()).filter(Boolean);
           const invalidIds = segIds.filter((id: string) => !plan.grounding_source_ids.includes(id));
           if (invalidIds.length > 0) throw new Error(`Invalid grounding IDs for this segment: ${invalidIds.join(", ")}`);
 
           segment = {
-            segment_id: i + 1,
-            ...realized,
-            dialogue: redactSecrets(realized.dialogue)
+            ...parsed,
+            dialogue: redactSecrets(parsed.dialogue)
           };
         } catch (err: any) {
           attempts++;
@@ -78,13 +80,10 @@ serve(async (req) => {
             // Internal fallback for this specific segment
             segment = {
               segment_id: i + 1,
-              dialogue: redactSecrets(`Moving on. ${plan.title}: ${Object.values(plan.facts).join(". ")}`),
+              dialogue: redactSecrets(`Moving on. ${plan.title}: ${Object.values(plan.facts).splice(0,3).join(". ")}`),
               grounding_source_id: plan.grounding_source_ids.join(", "),
               runware_b_roll_prompt: plan.b_roll_hint,
-              ui_action_card: {
-                is_active: true,
-                ...plan.ui_action_suggestion
-              }
+              ui_action_card: plan.ui_action_suggestion
             };
           }
         }
@@ -100,6 +99,15 @@ serve(async (req) => {
       timeline_segments
     };
 
+    try {
+      const validated = validateBriefingScript(scriptJson);
+      validateGroundingIds(validated.timeline_segments, allowedSourceIds);
+    } catch (validErr: any) {
+      return new Response(JSON.stringify({ error: "invalid_script", message: validErr.message }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
     // 3. Persist and Respond
     const { data: scriptData, error: dbErr } = await supabase
       .from("briefing_scripts")
@@ -109,9 +117,11 @@ serve(async (req) => {
     if (dbErr) throw dbErr;
 
     // 4. Update User State (Success!)
-    await supabase
-      .from("briefing_user_state")
-      .upsert({ user_id: userId, last_briefed_at: new Date().toISOString() }, { onConflict: "user_id" });
+    if (auth.mode !== "internal_key" && auth.user_id) {
+      await supabase
+        .from("briefing_user_state")
+        .upsert({ user_id: userId, last_briefed_at: new Date().toISOString() }, { onConflict: "user_id" });
+    }
 
     return new Response(JSON.stringify({ script_id: scriptData.id, script_json: scriptJson }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }

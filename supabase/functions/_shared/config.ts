@@ -11,6 +11,7 @@ export const config = {
   ENABLE_RUNWARE: Deno.env.get("ENABLE_RUNWARE") !== "false",
   MAX_BROLL_SEGMENTS: parseInt(Deno.env.get("MAX_BROLL_SEGMENTS") || "5"),
   DEFAULT_AVATAR_IMAGE_URL: Deno.env.get("DEFAULT_AVATAR_IMAGE_URL") || "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=800",
+  CONNECTOR_SECRET_KEY: Deno.env.get("CONNECTOR_SECRET_KEY"),
 };
 
 export type Config = typeof config;
@@ -22,6 +23,10 @@ export function validateConfig() {
     "SUPABASE_SERVICE_ROLE_KEY",
   ];
   
+  if (!config.CONNECTOR_SECRET_KEY) {
+    console.warn("CONNECTOR_SECRET_KEY is missing. Saving secure PATs or tokens will fail.");
+  }
+
   // Conditionally required
   if (config.AVATAR_PROVIDER === "fal") required.push("FAL_KEY");
   if (config.AVATAR_PROVIDER === "veed") required.push("VEED_API_KEY");

@@ -96,7 +96,7 @@ serve(async (req: Request) => {
         repo: i.payload?.repo || "Unknown Repo",
         title: i.title,
         url: i.url,
-        author_display: i.author,
+        author_display: i.payload?.author || "Unknown",
         status: i.payload?.status || "open",
         updated_time_iso: i.occurred_at,
       }));

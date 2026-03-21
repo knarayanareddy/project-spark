@@ -4,6 +4,7 @@ import Parser from "https://esm.sh/rss-parser@3.13.0";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
 import { sanitizeDeep, redactSecrets } from "../_shared/sanitize.ts";
+import { stableSourceId } from "../_shared/stableId.ts";
 
 validateConfig();
 
@@ -54,8 +55,10 @@ serve(async (req: Request) => {
           const externalId = entry.guid || entry.link || entry.title;
           if (!externalId) continue;
 
-          // Stable source_id derived from guid/link
-          const stableId = `news_${btoa(externalId).slice(0, 16)}`;
+          // Stable source_id derived from guid/link (SHA-256 hex)
+          const stableId = await stableSourceId("news", externalId);
+          
+          const isFallbackDate = !entry.isoDate && !entry.pubDate;
           const publishedAt = entry.isoDate || entry.pubDate || new Date().toISOString();
 
           syncedItems.push({
@@ -72,6 +75,7 @@ serve(async (req: Request) => {
             payload: sanitizeDeep({
               source_name: feed.title,
               categories: entry.categories,
+              missing_date: isFallbackDate
             }),
           });
         }

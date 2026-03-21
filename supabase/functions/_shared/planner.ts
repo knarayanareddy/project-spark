@@ -2,11 +2,12 @@ import { AssembledUserData } from "./userData.ts";
 
 export interface SegmentPlan {
   plan_id: string;
-  segment_kind: "weather" | "calendar_event" | "email" | "github_pr" | "jira_task" | "news_item" | "wrap";
+  segment_kind: "weather" | "calendar_event" | "email" | "github_pr" | "jira_task" | "news_item" | "wrap" | "news_digest" | "github_digest" | "email_digest";
   title: string;
   facts: any;
   grounding_source_ids: string[];
   ui_action_suggestion: {
+    is_active: boolean;
     card_type: string;
     title: string;
     action_button_text: string;
@@ -41,10 +42,11 @@ export function planBriefing(userData: AssembledUserData): SegmentPlan[] {
       facts: w,
       grounding_source_ids: [w.source_id],
       ui_action_suggestion: {
+        is_active: false,
         card_type: "weather_widget",
         title: `${w.location_display}: ${w.temp_c}°C`,
-        action_button_text: "View Forecast",
-        action_payload: "#",
+        action_button_text: "",
+        action_payload: "",
       },
       b_roll_hint: `Panoramic view of ${w.location_display}, ${w.summary} conditions`,
     });
@@ -60,71 +62,131 @@ export function planBriefing(userData: AssembledUserData): SegmentPlan[] {
         facts: ev,
         grounding_source_ids: [ev.source_id],
         ui_action_suggestion: {
+          is_active: !!ev.meeting_link,
           card_type: "calendar_join",
           title: ev.title,
-          action_button_text: ev.meeting_link ? "Join Call" : "View Event",
-          action_payload: ev.meeting_link || "#",
+          action_button_text: ev.meeting_link ? "Join Call" : "",
+          action_payload: ev.meeting_link || "",
         },
-        b_roll_hint: "Professional modern boardroom, conference table setup",
+        b_roll_hint: null,
       });
     });
   }
 
   // 3. News Items (Highly Ranked Delta)
-  if (userData.news_items) {
-    userData.news_items.slice(0, CAPS.news_item).forEach((news) => {
+  if (userData.news_items && userData.news_items.length > 0) {
+    const topIds = userData.news_items.slice(0, 3).map((n: any) => n.source_id);
+    
+    // Digest
+    plans.push({
+      plan_id: `news_digest_${topIds[0]}`,
+      segment_kind: "news_digest",
+      title: "Top AI News Abstract",
+      facts: { 
+        count: userData.news_items.length, 
+        top_headlines: userData.news_items.slice(0, 3).map((n: any) => n.title) 
+      },
+      grounding_source_ids: topIds,
+      ui_action_suggestion: {
+        is_active: false,
+        card_type: "link_open",
+        title: "",
+        action_button_text: "",
+        action_payload: "",
+      },
+      b_roll_hint: `Abstract fast-paced digital news network visualization`,
+    });
+
+    // Individual Items
+    userData.news_items.slice(0, CAPS.news_item).forEach((news: any, idx: number) => {
       plans.push({
         plan_id: `news_${news.source_id}`,
         segment_kind: "news_item",
-        title: "AI Development Update",
+        title: "News Deep Dive",
         facts: news,
         grounding_source_ids: [news.source_id],
         ui_action_suggestion: {
+          is_active: !!news.url,
           card_type: "link_open",
           title: news.title.slice(0, 40),
-          action_button_text: "Read Article",
-          action_payload: news.url,
+          action_button_text: news.url ? "Read Article" : "",
+          action_payload: news.url || "",
         },
-        b_roll_hint: `Futuristic news visual related to ${news.title.slice(0, 30)}, digital interface`,
+        b_roll_hint: idx === 0 ? `Futuristic news visual related to ${news.title.slice(0, 30)}, digital interface` : null,
       });
     });
   }
 
   // 4. GitHub PRs
-  if (userData.github_prs) {
-    userData.github_prs.slice(0, CAPS.github_pr).forEach((pr) => {
+  if (userData.github_prs && userData.github_prs.length > 0) {
+    const topGhIds = userData.github_prs.slice(0, CAPS.github_pr).map((pr: any) => pr.source_id);
+    
+    // GH Digest
+    plans.push({
+      plan_id: `gh_digest_${topGhIds[0]}`,
+      segment_kind: "github_digest",
+      title: "GitHub Overview",
+      facts: {
+        count: userData.github_prs.length,
+        top_repos: [...new Set(userData.github_prs.map((pr: any) => pr.repo))],
+      },
+      grounding_source_ids: topGhIds,
+      ui_action_suggestion: {
+        is_active: false,
+        card_type: "github_review",
+        title: "",
+        action_button_text: "",
+        action_payload: "",
+      },
+      b_roll_hint: `Code review on a dark themed IDE, abstract data flows, GitHub logo in background`,
+    });
+
+    // Individual Items
+    userData.github_prs.slice(0, CAPS.github_pr).forEach((pr: any) => {
       plans.push({
         plan_id: `gh_${pr.source_id}`,
         segment_kind: "github_pr",
-        title: "GitHub Activity",
+        title: "PR Review",
         facts: pr,
         grounding_source_ids: [pr.source_id],
         ui_action_suggestion: {
+          is_active: !!pr.url,
           card_type: "github_review",
           title: `${pr.repo}: ${pr.title.slice(0, 30)}`,
-          action_button_text: "Review PR",
-          action_payload: pr.url,
+          action_button_text: pr.url ? "Review PR" : "",
+          action_payload: pr.url || "",
         },
-        b_roll_hint: `Code review on a dark themed IDE, GitHub logo in background`,
+        b_roll_hint: null,
       });
     });
   }
 
   // 5. Wrap / Closing
   if (plans.length > 0) {
+    const usedIds = new Set<string>();
+    for (const p of plans) {
+      for (const gid of p.grounding_source_ids) {
+        usedIds.add(gid);
+        if (usedIds.size >= 5) break;
+      }
+      if (usedIds.size >= 5) break;
+    }
+    const wrapGrounding = Array.from(usedIds);
+
     plans.push({
       plan_id: "wrap_segment",
       segment_kind: "wrap",
       title: "Briefing Summary",
       facts: { summary: "End of morning briefing. Have a productive day." },
-      grounding_source_ids: ["system_summary"],
+      grounding_source_ids: wrapGrounding,
       ui_action_suggestion: {
+        is_active: false,
         card_type: "link_open",
-        title: "Briefing Complete",
-        action_button_text: "Done",
-        action_payload: "#",
+        title: "",
+        action_button_text: "",
+        action_payload: "",
       },
-      b_roll_hint: "Sunrise over a modern city skyline, high-resolution bokeh",
+      b_roll_hint: null,
     });
   }
 
