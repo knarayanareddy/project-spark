@@ -191,10 +191,31 @@ Make the Morning Briefing Bot safer (no plaintext tokens), more correct (canonic
 ## 📧 Gmail Metadata-Only Hook (Feature Flag)
 - Implement MVP `sync-gmail` behind `ENABLE_GMAIL` flag. Only extracts IDs, snippet, subject, sender. No email bodies.
 
-## ✅ Acceptance Checklist
-- [ ] Connectors UI accurately uses `set-connector-secret` (no direct DB upserts).
-- [ ] Plaintext PAT is completely absent from all DB tables readable by an authenticated user.
-- [ ] RSS sync successfully handles unicode payloads using the new `stableSourceId` helper.
-- [ ] Generated Briefings exhibit deterministic "Digest" segments rather than strict 1:1 mapping.
-- [ ] All action payloads in the `ui_action_card` are either valid URLs or disabled. No `#` placeholders.
 - [ ] Script successfully validates against `validateBriefingScript` on generation.
+
+---
+
+# Milestone 5A — Briefing Profiles & Module Catalog
+
+## Objective
+Add a product-grade personalization layer where a user selects from a catalog of briefing modules (persisted as "briefing profiles"). The system deduces required connectors, data buckets, and planner caps dynamically without hallucination logic.
+
+## 📦 Module Catalog Concept (Code-First Manifest)
+- A single source of truth (`supabase/functions/_shared/moduleCatalog.ts`) defines an array of highly structured modules.
+- **Example Modules**: `weather`, `calendar_today`, `inbox_triage`, `github_prs`, `github_mentions`, `jira_tasks`, `ai_news_delta`, `newsletters_digest`, `focus_plan`, `watchlist_alerts`.
+- **Properties Per Module**:
+  - `label`, `description`: UI display strings.
+  - `requiredConnectors`: Array mapping strictly to `[{ provider: "rss", optional: boolean }]` rules.
+  - `requiredUserDataBuckets`: Payload mapping targets ensuring downstream functions (`assemble-user-data`) correctly populate metrics (e.g., `["news_items"]`).
+  - `defaultSettings`: Configures item retrieval bounds (`caps`), filter keywords, etc.
+  - `allowedCardTypes`: Validated subset of `ui_action_card.card_type` security policy (e.g., `["github_review"]`).
+
+## 🗄️ Profile Schema Mapping
+The DB remains unaware of complex catalog nuances, storing strictly user state metadata.
+- **`briefing_profiles`**: Users build profiles mapping exactly to the UUID. Stores the `enabled_modules` JSON array containing string identifiers mapping to the code catalog, and `module_settings` overriding specific module `defaultSettings`.
+- **`briefing_module_state`**: A highly granular tracking layer tracking `last_seen_at` per `module_id` per `user_id`, replacing coarse-grained daily runs.
+
+## 🔌 Connector & Planner Mappings
+- **Connector Resolver**: Before running `assemble-user-data`, the system reads the chosen profile, fetches the enabled modules from the catalog, computes a `Set` of required connectors, and halts generation instantly if mandatory connector tokens are inactive.
+- **Data Bucket Mappings**: Instructs `assemble-user-data` to only SQL SELECT ranges directly requested by the unified `requiredUserDataBuckets` array, dropping expensive irrelevant lookups.
+- **Planner Rules (Caps)**: The `planner.ts` deterministic caps (`CAPS.github_pr: 2`) become dynamically inherited overrides derived structurally from `profile.module_settings[module_id].caps` (or resorting to the Catalog manifest baseline).
