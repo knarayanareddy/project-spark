@@ -566,3 +566,16 @@ Reorganize the frontend into a structured App Shell with persistent navigation a
 - SidebarNav: Left navigation.
 - AppHeader: Top bar with title, profile picker, and sync button.
 
+
+# UI Milestone 2 — Today Screen Redesign
+
+## Overview
+Modernize the player experience with a three-pane dashboard layout: Timeline, Video Stage, and Action Panel.
+
+## Components
+- SegmentTimeline: Sequence view with status indicators.
+- VideoStage: Immersive player with status overlays.
+- ActionPanel: Contextual tools for the current segment.
+- BriefControls: Primary action bar.
+- BriefEmptyState: Onboarding view.
+
