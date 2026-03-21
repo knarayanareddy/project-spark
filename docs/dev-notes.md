@@ -73,5 +73,46 @@ Allowed `card_type` values:
 - `link_open`
 
 ## 3. Grounding Contract
-- `grounding_source_id`: Must be a valid ID present in the sanitized user data provided to the LLM. 
-- Validation: The system enforces this via `grounding.ts` in the shared Edge Function module.
+---
+
+# Milestone 2 — Demo Unbreakable
+
+## Objective
+Upgrade the system to a "demo-unbreakable" state by implementing asynchronous rendering, unified authentication, and robust LLM recovery (repair/fallback).
+
+## 📂 Proposed Changes
+
+### 🛡️ Phase 1 — Unified Auth
+- **File**: `supabase/functions/_shared/auth.ts` (NEW)
+- **Files to Modify**: `generate-script`, `start-render`, `job-status`.
+- **Logic**: A single `authorizeRequest` helper that prioritizes Supabase Session (JWT) and falls back to `internal_key`.
+
+### ⚡ Phase 2 — Async Rendering & Locking
+- **Files**:
+  - `supabase/functions/render-worker/index.ts` (NEW)
+  - `supabase/functions/_shared/renderPipeline.ts` (NEW)
+- **Migration**: Add `locked_at`, `locked_by`, `heartbeat_at` to `render_jobs`.
+- **Logic**: `start-render` returns `job_id` immediately; background work uses `EdgeRuntime.waitUntil` or manual `render-worker` ticks.
+
+### 📊 Phase 3 — Progress Payload
+- **Files**: `supabase/functions/job-status/index.ts`
+- **Payload**: Include `progress: { total, complete, percent_complete, ... }`.
+
+### 🤖 Phase 4 — Script Reliability
+- **Files**:
+  - `supabase/functions/_shared/fallbackScript.ts` (NEW)
+  - `supabase/functions/generate-script/index.ts`
+- **Logic**: Repair prompt upon validation failure; deterministic fallback if repair fails.
+
+### 💻 Phase 5 — Frontend Sync
+- **Files**: `src/pages/Index.tsx`, `src/lib/api.ts`
+- **UI**: Add progress bar and "Resume Render" manual trigger.
+
+## 🔄 UI Flow (Sequence)
+1. **User** clicks "Generate Briefing" -> `generate-script` returns script.
+2. **User** clicks "Render Media" -> `start-render` returns `job_id` (Fast).
+3. **Frontend** polls `job-status` every 3s -> Progress bar fills.
+4. **If stuck**: User clicks "Resume Render" -> Calls `render-worker`.
+
+## 🛡️ Rollback Plan
+- **Switch back**: Revert `Index.tsx` to await `start-render` and use `Config.ASYNC_RENDER = false`.
