@@ -17,8 +17,32 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const authHeader = req.headers.get("Authorization");
   const internalKey = req.headers.get("x-internal-api-key");
-  if (!config.INTERNAL_API_KEY || internalKey !== config.INTERNAL_API_KEY) {
+  
+  let isAuthorized = false;
+
+  // 1. Check for Supabase Auth Session (JWT)
+  if (authHeader) {
+    try {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL") ?? "",
+        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (user && !error) isAuthorized = true;
+    } catch (e) {
+      console.warn("JWT auth failed, falling back to internal key if provided.");
+    }
+  }
+
+  // 2. Fallback to Internal API Key (Hackathon Mode)
+  if (!isAuthorized && config.INTERNAL_API_KEY && internalKey === config.INTERNAL_API_KEY) {
+    isAuthorized = true;
+  }
+
+  if (!isAuthorized) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

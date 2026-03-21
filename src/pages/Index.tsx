@@ -21,7 +21,21 @@ export default function Index() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState("");
+  const [hasSession, setHasSession] = useState(false);
+  const demoAuthMode = import.meta.env.VITE_DEMO_AUTH_MODE || "internal_key";
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setHasSession(!!session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setHasSession(!!session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const addError = (e: string) => setErrors((prev) => [...prev, e]);
 
@@ -170,7 +184,7 @@ export default function Index() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-2">
-          {!useMock && (
+          {!useMock && !hasSession && demoAuthMode === "internal_key" && (
             <div className="relative">
               <input
                 type="password"

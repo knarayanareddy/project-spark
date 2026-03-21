@@ -15,11 +15,21 @@ async function callEdgeFunction<T>(
   const url = new URL(`${FUNCTIONS_BASE}/${fnName}`);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
+
+  const demoAuthMode = import.meta.env.VITE_DEMO_AUTH_MODE || "internal_key";
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "x-internal-api-key": internalApiKey,
     apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   };
+
+  if (session) {
+    headers["Authorization"] = `Bearer ${session.access_token}`;
+  } else if (demoAuthMode === "internal_key") {
+    headers["x-internal-api-key"] = internalApiKey;
+  }
 
   const res = await fetch(url.toString(), {
     method,

@@ -29,6 +29,6 @@ export function validateConfig() {
 
   const missing = required.filter((key) => !config[key as keyof typeof config]);
   if (missing.length > 0) {
-    console.warn(`AI Provider keys missing: ${missingAI.join(", ")}. Fallbacks will be used.`);
+    console.warn(`AI Provider keys missing: ${missing.join(", ")}. Fallbacks will be used.`);
   }
 }

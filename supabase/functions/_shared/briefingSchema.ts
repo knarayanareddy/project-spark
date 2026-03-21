@@ -13,7 +13,7 @@ export const ActionCardSchema = z.object({
   title: z.string(),
   action_button_text: z.string(),
   action_payload: z.string(),
-});
+}).strict(); // Enforce no extra fields
 
 export const BriefingSegmentSchema = z.object({
   segment_id: z.number().int().positive(),
@@ -21,7 +21,7 @@ export const BriefingSegmentSchema = z.object({
   grounding_source_id: z.string().min(1),
   runware_b_roll_prompt: z.string().nullable(),
   ui_action_card: ActionCardSchema,
-});
+}).strict(); // Enforce no extra fields
 
 export const BriefingScriptSchema = z.object({
   script_metadata: z.object({

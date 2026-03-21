@@ -41,6 +41,8 @@ supabase functions deploy start-render --no-verify-jwt
 supabase functions deploy job-status --no-verify-jwt
 ```
 
+```
+
 ## 🧪 Development Flow
 1. **Mock Mode**: Enabled by default in the UI. Uses local `mockData.ts` to simulate the full flow without API credits.
 2. **Live Mode**: Requires your `INTERNAL_API_KEY` to be entered in the UI.
@@ -49,3 +51,6 @@ supabase functions deploy job-status --no-verify-jwt
 - **Never committed**: `.env` is ignored by git.
 - **Sanitization**: All user data is passed through `sanitizeDeep()` which truncates long fields and redacts common secret patterns.
 - **Validation**: If the LLM generates an invalid grounding source ID or non-sequential segments, the system rejects the output (Zero-Hallucination).
+
+## 📄 Repository Link
+Verified: [github.com/knarayanareddy/morning-briefing-bot-46f5a482](https://github.com/knarayanareddy/morning-briefing-bot-46f5a482)

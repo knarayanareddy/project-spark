@@ -5,7 +5,6 @@ interface ActionCardData {
   is_active: boolean;
   card_type?: string;
   title?: string;
-  description?: string;
   action_button_text?: string;
   action_payload?: string;
 }
@@ -54,7 +53,6 @@ export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: Acti
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-card-foreground text-sm truncate">{card.title}</h3>
-          <p className="text-xs text-muted-foreground">{card.description}</p>
         </div>
       </div>
 

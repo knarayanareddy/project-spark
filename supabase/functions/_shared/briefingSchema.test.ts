@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { validateBriefingScript } from "./briefingSchema";
 
-describe("Briefing Script Validation", () => {
+describe("Briefing Script Validation (Strict Mode)", () => {
   const validScript = {
     script_metadata: {
       persona_applied: "Expert",
@@ -53,9 +53,15 @@ describe("Briefing Script Validation", () => {
     expect(() => validateBriefingScript(invalid)).toThrow(/Total segments mismatch/);
   });
 
-  it("should fail if grounding_source_id is empty", () => {
+  it("should fail if unwanted fields are present (strict mode)", () => {
     const invalid = JSON.parse(JSON.stringify(validScript));
-    invalid.timeline_segments[0].grounding_source_id = "";
+    invalid.timeline_segments[0].ui_action_card.description = "unwanted field";
+    expect(() => validateBriefingScript(invalid)).toThrow();
+  });
+
+  it("should fail if card_type is invalid", () => {
+    const invalid = JSON.parse(JSON.stringify(validScript));
+    invalid.timeline_segments[0].ui_action_card.card_type = "invalid_type";
     expect(() => validateBriefingScript(invalid)).toThrow();
   });
 });
