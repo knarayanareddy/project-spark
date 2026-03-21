@@ -21,7 +21,7 @@ serve(async (req) => {
 
   try {
     const payload = await req.json();
-    let { id, name, persona, timezone, enabled_modules, module_settings } = sanitizeDeep(payload);
+    const { id, name, persona, timezone, enabled_modules, module_settings } = sanitizeDeep(payload);
 
     if (!name) throw new Error("Profile name is required");
 
@@ -39,7 +39,7 @@ serve(async (req) => {
 
     const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
     
-    let query = supabase.from("briefing_profiles");
+    const query = supabase.from("briefing_profiles");
     let result;
 
     const dataObj = {
