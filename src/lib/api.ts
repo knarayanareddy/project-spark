@@ -44,9 +44,13 @@ async function callEdgeFunction<T>(
   return res.json();
 }
 
-export async function generateScript(userPreferences: unknown, userData: unknown) {
+export async function generateScript(userPreferences: unknown, userData: unknown, profileId?: string | null) {
   return callEdgeFunction<{ script_id: string; script_json: unknown }>("generate-script", {
-    body: { user_preferences: userPreferences, user_data: userData },
+    body: {
+      user_preferences: userPreferences,
+      user_data: userData,
+      ...(profileId ? { profile_id: profileId } : {}),
+    },
   });
 }
 

@@ -7,7 +7,7 @@ import { SegmentPlaylist } from "@/components/SegmentPlaylist";
 import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, assembleUserData, getProfiles, upsertProfile, type SegmentStatus, type BriefingProfile } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { mockUserPreferences, mockUserData, mockScriptJson } from "@/lib/mockData";
-import { Loader2, Play, Clapperboard, Database, Zap, AlertCircle, Share2, Link } from "lucide-react";
+import { Loader2, Play, Clapperboard, Database, Zap, AlertCircle, Share2, Settings } from "lucide-react";
 import { Link as RouterLink } from "react-router-dom";
 
 type AppState = "idle" | "generating" | "script_ready" | "rendering" | "ready" | "playing";
@@ -288,6 +288,13 @@ export default function Index() {
             <Database className="w-3.5 h-3.5" />
             {useMock ? "Mock Data: ON" : "Live Mode: ON"}
           </button>
+
+          <RouterLink to="/briefing-builder">
+            <Button variant="outline" size="sm" className="h-9 border-zinc-800 hover:bg-white/5">
+              <Settings className="w-4 h-4 mr-2" />
+              Builder
+            </Button>
+          </RouterLink>
 
           <RouterLink to="/connectors">
             <Button variant="outline" size="sm" className="h-9 border-zinc-800 hover:bg-white/5">

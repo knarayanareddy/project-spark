@@ -308,3 +308,31 @@ POST generate-script
   - `ai_news_delta`: `last_seen_at` = newest `published_time_iso` of included news items (or `now()`).
   - `github_prs`, `inbox_triage`, all others: `last_seen_at` = `now()`.
 - Failure at any point before INSERT → no state update → next run re-fetches same window.
+
+---
+
+# Milestone 5E — Briefing Builder UI (Module Selector)
+
+## Objective
+A polished `/briefing-builder` page where users select modules, configure per-module settings, see live connector status, and generate a briefing from a saved profile.
+
+## Route: `/briefing-builder`
+- **Left panel**: Profile selector dropdown + "New Profile" button.
+- **Main grid**: 10 module cards, each toggleable.
+- **Module card**: label, description, connector requirement pills, connector status pill, expandable settings panel.
+- **Bottom bar**: "Sync Sources", "Generate Briefing" (calls `generate-script` with `profile_id`).
+
+## Settings Forms
+- `ai_news_delta`: keywords (tag input, max 30, each ≤40 chars), max_items (1–10).
+- `github_prs`: max_prs (1–10).
+- `inbox_triage`: max_emails (1–10).
+- Validation: client-side guard + server-side (upsert-profile validates caps).
+
+## Connector Status Display
+- Pulled from `assemble-user-data` meta `connector_status_summary` after page load.
+- Pill: green "Active", amber "Missing", red "Error".
+- Missing → CTA button "Go to Connectors".
+
+## Security
+- No secrets stored in localStorage — only `profile_id` (UUID).
+- No connector tokens ever passed through UI state.
