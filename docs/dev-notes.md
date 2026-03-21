@@ -590,3 +590,17 @@ Transition the Builder to a two-pane layout for streamlined profile management.
 - ModuleSettingsPanel: Dynamic configuration form for the selected module.
 - PreviewPanel: High-fidelity preview of the assembled briefing plan.
 
+
+# UI Milestone 4 — Connectors & Dev Mode
+
+## Overview
+Centralize connector management with health-aware cards and gate advanced tools behind a Developer Mode. 
+
+## Developer Mode
+- Toggle in Header.
+- Gates: PAT inputs, raw JSON debug panels, internal keys.
+
+## Connector Health
+- RSS/GitHub cards now show detailed status from connector_health table.
+- History of last 5 sync runs per connector.
+
