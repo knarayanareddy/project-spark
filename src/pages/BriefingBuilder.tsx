@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Loader2, Zap, Settings2, Share2, CheckCircle2, AlertCircle, XCircle, ChevronDown, ChevronUp, ArrowLeft, RefreshCw } from "lucide-react";
-import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, planPreview, getModuleCatalog, PublicModuleDefinition } from "@/lib/api";
+import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, previewPlan, getModuleCatalog, PublicModuleDefinition } from "@/lib/api";
 import { generateScript, startRender, setInternalApiKey } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -175,17 +175,30 @@ export default function BriefingBuilder() {
   };
 
   // ── Sync ──────────────────────────────────────────────────────────────────
-  const handleSync = async () => {
+  const handleSync = async (force = false) => {
+    if (!hasSession && !apiKey) {
+      setStatusMsg("Authentication required to sync sources.");
+      return;
+    }
+    
     setIsSyncing(true);
     setStatusMsg(null);
     try {
-      const { syncNews, syncGithub } = await import("@/lib/api");
-      const tasks = [];
-      if (enabledModules.has("ai_news_delta")) tasks.push(syncNews());
-      if (enabledModules.has("github_prs") || enabledModules.has("github_mentions")) tasks.push(syncGithub());
-      await Promise.allSettled(tasks);
+      if (selectedProfileId) {
+        const { syncRequiredConnectors } = await import("@/lib/api");
+        const res = await syncRequiredConnectors(selectedProfileId, force ? "force" : "best_effort");
+        const summary = res.results.map(r => `${PROVIDER_LABEL[r.provider] || r.provider}: ${r.outcome}${r.items_synced ? ` (+${r.items_synced})` : ""}`).join(", ");
+        setStatusMsg(`✓ Sync complete: ${summary}`);
+      } else {
+        // Fallback for mock mode
+        const { syncNews, syncGithub } = await import("@/lib/api");
+        const tasks = [];
+        if (enabledModules.has("ai_news_delta")) tasks.push(syncNews());
+        if (enabledModules.has("github_prs") || enabledModules.has("github_mentions")) tasks.push(syncGithub());
+        await Promise.allSettled(tasks);
+        setStatusMsg("✓ Sources synced (Mock Mode)");
+      }
       await loadConnectorStatus();
-      setStatusMsg("✓ Sources synced");
     } catch (e: any) {
       setStatusMsg("Sync error: " + e.message);
     } finally {
@@ -201,8 +214,11 @@ export default function BriefingBuilder() {
     setIsPreviewing(true);
     setStatusMsg(null);
     try {
-      const res = await planPreview(selectedProfileId);
-      setPreviewPlans(res.preview);
+      const { previewPlan } = await import("@/lib/api");
+      const res = await previewPlan(selectedProfileId);
+      setPreviewPlans(res.plan_summary.ordered);
+      // Optional: Store the whole response if needed, but for now just the ordered list
+      // In a real app we might want to show the by_module breakdown too.
     } catch (e: any) {
       setStatusMsg("Preview error: " + e.message);
     } finally {
@@ -440,6 +456,7 @@ export default function BriefingBuilder() {
                   <div className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-primary" />
                     <h3 className="font-bold">Briefing Plan Preview</h3>
+                    <Badge variant="secondary" className="ml-2">{previewPlans.length} Segments</Badge>
                   </div>
                   <button onClick={() => setPreviewPlans(null)} className="text-muted-foreground hover:text-foreground">
                     <XCircle className="w-5 h-5" />
@@ -453,21 +470,27 @@ export default function BriefingBuilder() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm">{p.title}</span>
+                          <span className="font-semibold text-sm">{p.title || "Untitled Segment"}</span>
                           <Badge variant="outline" className="text-[10px] py-0">{p.segment_kind}</Badge>
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 truncate">Grounding: {p.grounding_source_ids.slice(0, 2).join(", ")}</p>
-                        {p.ui_action_suggestion?.is_active && (
+                        {p.action?.is_active && (
                           <div className="mt-2 text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 inline-block border border-blue-500/20">
-                            Action: {p.ui_action_suggestion.action_button_text}
+                            Action: {p.action.action_button_text}
                           </div>
                         )}
                       </div>
                     </div>
                   ))}
                   {previewPlans.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground italic">
-                      No segments will be generated with current data.
+                    <div className="text-center py-12 space-y-4">
+                      <div className="text-muted-foreground italic">
+                        No segments will be generated with current data.
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => { setPreviewPlans(null); handleSync(); }}>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Sync Sources Now
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -482,10 +505,28 @@ export default function BriefingBuilder() {
 
       {/* Bottom action bar */}
       <footer className="border-t border-border bg-card px-6 py-3 flex items-center gap-3 shrink-0">
-        <Button variant="outline" size="sm" onClick={handleSync} disabled={isSyncing || enabledModules.size === 0}>
-          {isSyncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-          Sync Sources
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleSync(false)} 
+            disabled={isSyncing || (selectedProfileId === null && enabledModules.size === 0)}
+            className="rounded-r-none border-r-0"
+          >
+            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Sync Sources
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleSync(true)}
+            disabled={isSyncing || !selectedProfileId}
+            className="rounded-l-none px-2"
+            title="Force sync (bypass cooldown)"
+          >
+            <Zap className="w-3.5 h-3.5" />
+          </Button>
+        </div>
         <div className="flex-1" />
         <span className="text-xs text-muted-foreground">{enabledModules.size} module{enabledModules.size !== 1 ? "s" : ""} selected</span>
         <Button variant="outline" size="sm" onClick={handleSave} disabled={isSaving}>

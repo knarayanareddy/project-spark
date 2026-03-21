@@ -1,8 +1,12 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { authorizeRequest } from "../_shared/auth.ts"
-import { config } from "../_shared/config.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { logAudit } from "../_shared/usage.ts"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { config, validateConfig } from "../_shared/config.ts";
+import { authorizeRequest } from "../_shared/auth.ts";
+import { logAudit } from "../_shared/usage.ts";
+import { syncGmailForUser } from "../_shared/syncers/gmail.ts";
+import { shouldSkipSyncNow, recordSyncAttemptStart, recordSyncSkip } from "../_shared/connectorHealth.ts";
+
+validateConfig();
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,29 +14,33 @@ const corsHeaders = {
 }
 
 serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const authResult = await authorizeRequest(req, config);
-    if (!authResult.ok) {
-      return new Response(JSON.stringify(authResult.body), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: authResult.status,
+    const auth = await authorizeRequest(req, config);
+    if (!auth.ok) {
+      return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const userId = auth.user_id!;
+    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+    const provider = "google";
+
+    const { skip, reason } = await shouldSkipSyncNow(supabase, { userId, provider });
+    const runId = await recordSyncAttemptStart(supabase, { userId, provider });
+
+    if (skip) {
+      await recordSyncSkip(supabase, { runId, reason: reason || "Unknown skip reason" });
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // STUB: Gmail sync requires OAuth which is slated for v1.1
-    // This hook is here to satisfy the Milestone 3 architectural requirement.
-    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
-    await logAudit(supabase, authResult.user_id || null, "sync_gmail", { message: "Sync attempt on stub" });
+    const { items_synced, message } = await syncGmailForUser(supabase, { userId, runId });
+
+    await logAudit(supabase, userId, "sync_gmail", { message: "Sync attempt on stub" });
     
-    return new Response(JSON.stringify({ 
-      ok: true, 
-      items_synced: 0,
-      message: "Gmail sync is currently a stub (OAuth required for v1.1)"
-    }), {
+    return new Response(JSON.stringify({ ok: true, items_synced, message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })

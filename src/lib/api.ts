@@ -54,8 +54,22 @@ export async function generateScript(userPreferences: unknown, userData: unknown
   });
 }
 
-export async function planPreview(profileId: string) {
-  return callEdgeFunction<{ preview: any[] }>("plan-preview", {
+export async function previewPlan(profileId: string) {
+  return callEdgeFunction<{ 
+    profile_id: string; 
+    plan_summary: { 
+      total_segments: number; 
+      by_module: Array<{ module_id: string; segments: number }>;
+      ordered: Array<{
+        order_index: number;
+        segment_kind: string;
+        title: string;
+        grounding_source_ids: string[];
+        action?: { is_active: boolean; card_type: string; title: string; action_button_text: string };
+      }>;
+    };
+    connector_status: Array<{ provider: string; status: string }>;
+  }>("preview-plan", {
     body: { profile_id: profileId },
   });
 }
@@ -109,6 +123,13 @@ export async function syncNews() {
 
 export async function syncGithub() {
   return callEdgeFunction<{ ok: boolean; items_synced: number }>("sync-github", {});
+}
+
+export async function syncRequiredConnectors(profileId: string, mode: "best_effort" | "force" = "best_effort") {
+  return callEdgeFunction<{ profile_id: string; required_providers: string[]; results: any[] }>(
+    "sync-required-connectors",
+    { body: { profile_id: profileId, mode } }
+  );
 }
 
 export async function assembleUserData() {

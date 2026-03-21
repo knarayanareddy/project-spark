@@ -199,27 +199,29 @@ serve(async (req: Request) => {
       segments_count: timeline_segments.length 
     });
 
-    // ── PHASE 4c: Background Sync Trigger (Best-effort news refresh) ─────────
-    const syncNewsRef = async () => {
+    // ── PHASE 4c: Background Sync Trigger (Profile-aware Orchestrator) ───────
+    const triggerSync = async () => {
+      if (!profile_id) return;
       try {
-        const syncUrl = `${config.SUPABASE_URL}/functions/v1/sync-news`;
+        const syncUrl = `${config.SUPABASE_URL}/functions/v1/sync-required-connectors`;
         await fetch(syncUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
             "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
-          }
+          },
+          body: JSON.stringify({ profile_id, mode: "best_effort" })
         });
       } catch (err) {
-        console.warn("Background sync-news failed:", err);
+        console.warn("Background sync-required-connectors failed:", err);
       }
     };
 
     if ((globalThis as any).EdgeRuntime?.waitUntil) {
-      (globalThis as any).EdgeRuntime.waitUntil(syncNewsRef());
+      (globalThis as any).EdgeRuntime.waitUntil(triggerSync());
     } else {
-      syncNewsRef();
+      triggerSync();
     }
 
     // ── PHASE 5: Update per-module last_seen_at (after successful DB write) ───

@@ -383,3 +383,73 @@ To scale features efficiently and securely, we are moving the "Source of Truth" 
 The Briefing Builder UI no longer hardcodes the module list. It fetches the manifest and renders:
 - Toggles based on available `id`s.
 - Settings forms based on `settingsUi` metadata (e.g., whether to show a numeric "caps" input or keyword list).
+
+---
+
+# Milestone 7A — Connector Health & Telemetry
+
+## Objective
+Add a production-leaning “operations layer” to track sync attempts, successes, and failures deterministically, and to enforce safe backoff/cooldowns.
+
+## 📂 Data Model
+### `connector_health`
+- **Purpose**: Current state of a user's connection to a provider.
+- **Fields**: `user_id`, `provider`, `status` (active/error/missing/revoked), `connected` (bool), `last_attempt_at`, `last_success_at`, `consecutive_failures`, `next_retry_at`, `cooldown_until`.
+- **Constraint**: PRIMARY KEY (user_id, provider).
+- **RLS**: Owner SELECT only. All writes via Service Role.
+
+### `connector_sync_runs`
+- **Purpose**: Historical log of every sync attempt.
+- **Fields**: `id`, `user_id`, `provider`, `started_at`, `finished_at`, `outcome` (success/failed/skipped), `items_found`, `items_upserted`, `error_code`, `error_message`, `meta` (JSONB).
+- **RLS**: Owner SELECT only.
+
+## 🚀 Backoff & Cooldown Strategy
+- **Exponential Backoff**: `next_retry_at` is computed as `base * 2^consecutive_failures`.
+- **Bounds**: Min 1 minute, Max 1 hour.
+- **Cooldown**: Manual reconnect or specific error resolution resets the state.
+
+## 🔄 Integration
+- **`assemble-user-data`**: Now sources `connector_status[]` objects directly from `connector_health`.
+- **`sync-*` Functions**: Every sync run now calls `recordSyncAttemptStart` and either `recordSyncSuccess` or `recordSyncFailure`.
+- Privacy: Error messages are truncated to 300 chars and sanitized. No tokens or PII are ever logged in telemetry tables.
+
+---
+
+# Milestone 7B — Sync Orchestrator
+
+## Objective
+Generate briefings with the freshest data by syncing only the connectors required by the selected profile's enabled modules.
+
+## 📂 Mapping & Logic
+- **Discovery**: The orchestrator reads the profile, looks up `requiredConnectors` in the `moduleManifest`, and builds a unique set of providers to sync.
+- **Backgrounding**: Uses `EdgeRuntime.waitUntil` in `generate-script` to ensure sync continues even after the script assembly response is sent.
+- **Budget**: High-impact, fast connectors (RSS) are synced synchronously (limit 1-2s) to improve immediate brief quality.
+
+## 🛡️ Locking & Concurrency
+- **Strategy**: Reuses `connector_health.cooldown_until` as a lightweight atomic lock.
+- **Implementation**: `UPDATE connector_health SET cooldown_until = now() + interval '30 seconds' WHERE user_id=? AND provider=? AND (cooldown_until is null OR cooldown_until < now())`.
+- **Idempotency**: Prevents multiple rapid clicks from spawning redundant sync processes.
+
+## 🔌 Syncer Refactor
+- Sync logic is moved to `_shared/syncers/` as pure TypeScript functions, allowing both direct function calls (orchestrator) and HTTP triggered edge functions (manual sync).
+
+---
+
+# Milestone 7C — Preview Plan
+
+## Objective
+Provide a cost-free, deterministic preview of the briefing structure to build user trust and enable debugging without triggering LLM or media generation costs.
+
+## 🔒 Security & Privacy
+- **Truncation**: Titles/subjects are truncated to 60 chars.
+- **Redaction**: No body text or snippets are included in the preview.
+- **Action Cards**: Only `title` and `button_text` are exposed; the full `payload` is omitted.
+
+## 📊 Response Shape
+- **Plan Summary**: Includes total segment counts and a breakdown by module.
+- **Ordered List**: A sequence of `segment_kind`, `title`, and `grounding_source_ids`.
+- **Connector Health**: Includes the `connector_status[]` from `assemble-user-data` to highlight why certain modules might be empty.
+
+## ⚙️ Execution
+- Uses the shared `planner.ts` logic directly.
+- Triggers a background `sync-required-connectors` to ensure subsequent generation has fresh data.

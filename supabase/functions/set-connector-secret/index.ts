@@ -70,6 +70,10 @@ serve(async (req: Request) => {
 
     if (connErr) throw connErr;
 
+    // ── Update Connector Health (Telemetry)
+    const { initOrUpsertHealthOnConnect } = await import("../_shared/connectorHealth.ts");
+    await initOrUpsertHealthOnConnect(supabase, { userId, provider, connected: true, status: "active" });
+
     // ── Audit Logging
     await logAudit(supabase, userId, "set_connector_secret", { provider });
 
