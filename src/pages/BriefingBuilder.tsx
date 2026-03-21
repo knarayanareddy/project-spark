@@ -235,34 +235,7 @@ export default function BriefingBuilder() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      {/* Header */}
-      <header className="border-b border-border bg-card px-6 py-4 flex items-center gap-4 shrink-0">
-        <Link to="/" className="text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary" />
-          </div>
-          <h1 className="font-bold text-lg tracking-tight">Briefing Builder</h1>
-        </div>
-        <div className="flex-1" />
-        {!hasSession && (
-          <input
-            type="password"
-            placeholder="Internal API Key (optional)"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            className="h-9 px-3 text-xs rounded-md bg-muted border border-border text-foreground w-48 font-mono outline-none"
-          />
-        )}
-        <Link to="/connectors">
-          <Button variant="outline" size="sm" className="h-9 border-zinc-800">
-            <Share2 className="w-4 h-4 mr-2" />Connectors
-          </Button>
-        </Link>
-      </header>
+    <div className="flex flex-col h-full overflow-hidden bg-background text-foreground">
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar — Profile selector */}
@@ -630,7 +603,7 @@ function WatchlistModal({
   const update = (key: string, val: any) => setLocalRule((prev: any) => ({ ...prev, [key]: val }));
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[60] flex items-center justify-center p-6">
+    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
       <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
         <div className="p-4 border-b border-border flex items-center justify-between bg-primary/5">
           <div className="flex items-center gap-2 text-primary">

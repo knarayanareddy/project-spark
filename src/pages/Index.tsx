@@ -227,112 +227,7 @@ export default function Index() {
   };
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
-      {/* Top bar */}
-      <header className="border-b border-border bg-card px-4 py-3 flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary" />
-          </div>
-          <h1 className="font-bold text-foreground text-lg tracking-tight">Executive Briefing</h1>
-        </div>
-        
-        <div className="flex-1" />
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 border-r border-border pr-3 mr-1">
-            <select
-              className="h-9 px-3 text-xs rounded-md bg-secondary border border-border text-foreground font-mono focus:ring-1 focus:ring-primary outline-none"
-              value={selectedProfileId || "mock-default"}
-              onChange={(e) => {
-                if (e.target.value === "CREATE_NEW") {
-                  const name = window.prompt("Enter new profile name:");
-                  if (name) handleCreateProfile(name);
-                } else {
-                  setSelectedProfileId(e.target.value === "mock-default" ? null : e.target.value);
-                  localStorage.setItem("selectedProfileId", e.target.value);
-                }
-              }}
-            >
-              <option value="mock-default">Mock / Default</option>
-              {profiles.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-              <option value="CREATE_NEW">+ Create Profile</option>
-            </select>
-          </div>
-
-          {!useMock && !hasSession && demoAuthMode === "internal_key" && (
-            <div className="relative">
-              <input
-                type="password"
-                placeholder="Internal API Key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className={`h-9 px-3 text-xs rounded-md bg-muted border ${apiKey ? 'border-border' : 'border-primary/50'} text-foreground w-48 font-mono focus:ring-1 focus:ring-primary outline-none transition-all`}
-              />
-              {!apiKey && (
-                <span className="absolute -top-6 right-0 text-[10px] text-primary font-medium uppercase">Required</span>
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={() => setUseMock(!useMock)}
-            className={`h-9 px-3 text-xs rounded-md border transition-all font-mono flex items-center gap-2 ${
-              useMock
-                ? "bg-success/10 border-success/30 text-success"
-                : "bg-secondary/50 border-border text-muted-foreground hover:bg-secondary"
-            }`}
-          >
-            <Database className="w-3.5 h-3.5" />
-            {useMock ? "Mock Data: ON" : "Live Mode: ON"}
-          </button>
-
-          <RouterLink to="/briefing-builder">
-            <Button variant="outline" size="sm" className="h-9 border-zinc-800 hover:bg-white/5">
-              <Settings className="w-4 h-4 mr-2" />
-              Builder
-            </Button>
-          </RouterLink>
-
-          <RouterLink to="/connectors">
-            <Button variant="outline" size="sm" className="h-9 border-zinc-800 hover:bg-white/5">
-              <Share2 className="w-4 h-4 mr-2" />
-              Connect Sources
-            </Button>
-          </RouterLink>
-
-          <Button
-            variant={state === "script_ready" ? "outline" : "glow"}
-            size="sm"
-            onClick={handleGenerateScript}
-            disabled={state === "generating" || state === "rendering" || state === "playing"}
-            className="h-9 transition-all"
-          >
-            {state === "generating" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            {state === "script_ready" ? "Regenerate Script" : "Generate Briefing"}
-          </Button>
-
-          <Button
-            variant={state === "script_ready" ? "glow" : "outline"}
-            size="sm"
-            onClick={handleRender}
-            disabled={state !== "script_ready"}
-            className="h-9 transition-all"
-          >
-            {state === "rendering" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clapperboard className="w-4 h-4" />}
-            Render Media
-          </Button>
-
-          {state === "ready" && (
-            <Button variant="success" size="sm" onClick={handlePlay} className="h-9 animate-in zoom-in-95">
-              <Play className="w-4 h-4" />
-              Play Briefing
-            </Button>
-          )}
-        </div>
-      </header>
+    <div className="flex flex-col h-full overflow-hidden bg-background text-foreground">
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
@@ -364,7 +259,7 @@ export default function Index() {
                   bespoke B-roll imagery, and interactive productivity cards.
                 </p>
               </div>
-              <Button size="lg" variant="glow" onClick={handleGenerateScript} disabled={state === "generating"}>
+              <Button size="lg" variant="default" onClick={handleGenerateScript} disabled={state === "generating"}>
                 {state === "generating" ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Zap className="w-5 h-5 mr-2" />}
                 Get Started
               </Button>
@@ -423,8 +318,8 @@ export default function Index() {
                 )}
                 
                 {state === "ready" && !state.includes("playing") && (
-                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                    <Button variant="glow" size="lg" onClick={handlePlay} className="rounded-full w-20 h-20 p-0 flex items-center justify-center pl-1">
+                   <div className="absolute inset-0 bg-background/40 flex items-center justify-center">
+                    <Button variant="default" size="lg" onClick={handlePlay} className="rounded-full w-20 h-20 p-0 flex items-center justify-center pl-1">
                       <Play className="w-10 h-10" />
                     </Button>
                   </div>

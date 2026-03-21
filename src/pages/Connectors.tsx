@@ -129,24 +129,18 @@ export default function Connectors() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate("/")} className="hover:bg-white/10">
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <h1 className="text-3xl font-bold tracking-tight">Data Connectors</h1>
-        </div>
+    <div className="flex flex-col h-full overflow-hidden bg-background text-foreground p-8">
+      <div className="max-w-4xl mx-auto w-full space-y-8">
 
         <div className="grid md:grid-cols-2 gap-8">
           {/* RSS SECTION */}
-          <Card className="bg-zinc-900 border-zinc-800 text-white">
+          <Card className="bg-card border-border text-foreground">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-foreground">
                 <Rss className="w-5 h-5 text-orange-500" />
                 AI News (RSS)
               </CardTitle>
-              <CardDescription className="text-zinc-400">
+              <CardDescription className="text-muted-foreground">
                 Sync latest developments from your favorite blogs and feeds.
               </CardDescription>
             </CardHeader>
@@ -163,7 +157,7 @@ export default function Connectors() {
                         newFeeds[idx].url = e.target.value;
                         setRssFeeds(newFeeds);
                       }}
-                      className="bg-black border-zinc-800"
+                      className="bg-secondary border-border"
                     />
                     <Button 
                       variant="ghost" 
@@ -179,7 +173,7 @@ export default function Connectors() {
                   variant="outline" 
                   size="sm" 
                   onClick={() => setRssFeeds([...rssFeeds, { title: "New Feed", url: "" }])}
-                  className="w-full border-zinc-800 hover:bg-white/5"
+                  className="w-full border-border hover:bg-secondary"
                 >
                   <Plus className="w-4 h-4 mr-2" /> Add Feed
                 </Button>
@@ -191,7 +185,7 @@ export default function Connectors() {
                   placeholder="agent, reasoning, multimodal..." 
                   value={keywords} 
                   onChange={(e) => setKeywords(e.target.value)}
-                  className="bg-black border-zinc-800"
+                  className="bg-secondary border-border"
                 />
               </div>
 
@@ -208,13 +202,13 @@ export default function Connectors() {
           </Card>
 
           {/* GITHUB SECTION */}
-          <Card className="bg-zinc-900 border-zinc-800 text-white">
+          <Card className="bg-card border-border text-foreground">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Github className="w-5 h-5 text-zinc-400" />
+              <CardTitle className="flex items-center gap-2 text-foreground">
+                <Github className="w-5 h-5 text-muted-foreground" />
                 GitHub (MVP)
               </CardTitle>
-              <CardDescription className="text-zinc-400">
+              <CardDescription className="text-muted-foreground">
                 Sync open PRs and notifications to your executive briefing.
               </CardDescription>
             </CardHeader>
@@ -226,7 +220,7 @@ export default function Connectors() {
                   placeholder="ghp_..." 
                   value={githubPat} 
                   onChange={(e) => setGithubPat(e.target.value)}
-                  className="bg-black border-zinc-800"
+                  className="bg-secondary border-border"
                 />
                 <p className="text-[10px] text-zinc-500 italic">Token is stored encrypted for the sync worker.</p>
               </div>
@@ -242,13 +236,13 @@ export default function Connectors() {
         </div>
 
         {/* GMAIL STUB */}
-        <div className="p-6 border border-zinc-800 rounded-lg bg-zinc-950/50">
+        <div className="p-6 border border-border rounded-lg bg-card/50">
           <div className="flex items-center justify-between opacity-50">
             <div>
-              <h3 className="font-semibold text-lg">Google Workspace (Gmail)</h3>
-              <p className="text-sm text-zinc-500">Scheduled for v1.1 — Requires gmail.readonly scope.</p>
+              <h3 className="font-semibold text-lg text-foreground">Google Workspace (Gmail)</h3>
+              <p className="text-sm text-muted-foreground">Scheduled for v1.1 — Requires gmail.readonly scope.</p>
             </div>
-            <div className="px-3 py-1 bg-zinc-800 rounded-full text-xs">Coming Soon</div>
+            <div className="px-3 py-1 bg-secondary rounded-full text-xs text-muted-foreground">Coming Soon</div>
           </div>
         </div>
       </div>
