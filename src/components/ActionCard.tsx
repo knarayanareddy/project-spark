@@ -29,6 +29,8 @@ const iconMap: Record<string, React.ReactNode> = {
 };
 
 export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: ActionCardProps) {
+  const [isSaved, setIsSaved] = useState(false);
+
   if (!card || !card.is_active) {
     return (
       <div className="rounded-lg border border-border bg-card p-6 text-center">
@@ -36,8 +38,6 @@ export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: Acti
       </div>
     );
   }
-
-  const [isSaved, setIsSaved] = useState(false);
 
   const handleAction = async () => {
     if (card.card_type === "save_reading_list") {
