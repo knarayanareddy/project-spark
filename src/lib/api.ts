@@ -54,6 +54,12 @@ export async function generateScript(userPreferences: unknown, userData: unknown
   });
 }
 
+export async function planPreview(profileId: string) {
+  return callEdgeFunction<{ preview: any[] }>("plan-preview", {
+    body: { profile_id: profileId },
+  });
+}
+
 export async function startRender(scriptId: string) {
   return callEdgeFunction<{ job_id: string }>("start-render", {
     body: { script_id: scriptId },

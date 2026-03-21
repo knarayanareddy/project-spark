@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Loader2, Zap, Settings2, Share2, CheckCircle2, AlertCircle, XCircle, ChevronDown, ChevronUp, ArrowLeft, RefreshCw } from "lucide-react";
 import { MODULE_CATALOG, ModuleId } from "@/lib/moduleCatalog";
-import { getProfiles, upsertProfile, BriefingProfile, assembleUserData } from "@/lib/api";
+import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, planPreview } from "@/lib/api";
 import { generateScript, startRender, setInternalApiKey } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -46,6 +46,8 @@ export default function BriefingBuilder() {
   const [keywordInput, setKeywordInput] = useState<Record<string, string>>({});
   const [hasSession, setHasSession] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [previewPlans, setPreviewPlans] = useState<any[] | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -191,6 +193,23 @@ export default function BriefingBuilder() {
       setStatusMsg("Sync error: " + e.message);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!selectedProfileId) {
+      setStatusMsg("Save profile first to preview.");
+      return;
+    }
+    setIsPreviewing(true);
+    setStatusMsg(null);
+    try {
+      const res = await planPreview(selectedProfileId);
+      setPreviewPlans(res.preview);
+    } catch (e: any) {
+      setStatusMsg("Preview error: " + e.message);
+    } finally {
+      setIsPreviewing(false);
     }
   };
 
@@ -408,6 +427,52 @@ export default function BriefingBuilder() {
               </div>
             )}
           </div>
+
+          {/* Preview Overlay */}
+          {previewPlans && (
+            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+              <div className="bg-card border border-border rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+                <div className="p-4 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-primary" />
+                    <h3 className="font-bold">Briefing Plan Preview</h3>
+                  </div>
+                  <button onClick={() => setPreviewPlans(null)} className="text-muted-foreground hover:text-foreground">
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {previewPlans.map((p, idx) => (
+                    <div key={idx} className="flex gap-4 p-3 rounded-lg bg-secondary/30 border border-border/50">
+                      <div className="w-8 h-8 rounded bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold text-xs">
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">{p.title}</span>
+                          <Badge variant="outline" className="text-[10px] py-0">{p.segment_kind}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">Grounding: {p.grounding_source_ids.slice(0, 2).join(", ")}</p>
+                        {p.ui_action_suggestion?.is_active && (
+                          <div className="mt-2 text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 inline-block border border-blue-500/20">
+                            Action: {p.ui_action_suggestion.action_button_text}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {previewPlans.length === 0 && (
+                    <div className="text-center py-12 text-muted-foreground italic">
+                      No segments will be generated with current data.
+                    </div>
+                  )}
+                </div>
+                <div className="p-4 border-t border-border flex justify-end">
+                  <Button onClick={() => setPreviewPlans(null)}>Close Preview</Button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -422,6 +487,10 @@ export default function BriefingBuilder() {
         <Button variant="outline" size="sm" onClick={handleSave} disabled={isSaving}>
           {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
           Save Profile
+        </Button>
+        <Button variant="outline" size="sm" onClick={handlePreview} disabled={isPreviewing || enabledModules.size === 0}>
+           {isPreviewing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Settings2 className="w-4 h-4 mr-2" />}
+           Preview Plan
         </Button>
         <Button
           variant="default"
