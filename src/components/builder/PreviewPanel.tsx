@@ -1,151 +1,97 @@
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { 
-  Play, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Clock, 
-  LayoutList, 
-  Info,
-  ChevronRight,
-  Eye
-} from "lucide-react";
+import React from "react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { Play, PlayCircle, Clock, Zap, Save, CheckCircle2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-interface PreviewResult {
-  total_segments: number;
-  segments: {
-    module_id: string;
-    title: string;
-    type: string;
-    grounding_source_ids: string[];
-  }[];
-  stale_connectors: string[];
-  missing_connectors: string[];
-}
+export default function PreviewPanel({ onPreview, isLoading, result, layout }: any) {
+  if (layout === "silent") {
+    return (
+      <div className="flex flex-col h-full space-y-8 animate-in slide-in-from-right-4 duration-1000">
+        
+        {/* Video Stage */}
+        <div className="relative aspect-video rounded-3xl overflow-hidden bg-[#111928] border border-white/5 shadow-2xl group cursor-pointer">
+          <img 
+            src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=60" 
+            className="w-full h-full object-cover opacity-60 transition-transform duration-700 group-hover:scale-105"
+            alt="Briefing Stage"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0E14] to-transparent opacity-80" />
+          
+          {/* Centered Play Button Mock */}
+          <div className="absolute inset-0 flex items-center justify-center">
+             <div className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 transition-all group-hover:bg-[#5789FF] group-hover:border-[#5789FF] group-hover:scale-110 shadow-[0_0_30px_rgba(87,137,255,0.3)]">
+                <Play className="w-6 h-6 text-white fill-current" />
+             </div>
+          </div>
 
-interface PreviewPanelProps {
-  onPreview: () => void;
-  isLoading: boolean;
-  result: PreviewResult | null;
-}
+          {/* Status Overlay */}
+          <div className="absolute bottom-6 left-6 flex items-center gap-3">
+             <div className="bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-sm uppercase tracking-tighter">GEN-4</div>
+             <span className="text-xs text-white/90 font-semibold tracking-wide flex items-center gap-2">
+               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+               Drafting Script...
+             </span>
+          </div>
+        </div>
 
-export default function PreviewPanel({ onPreview, isLoading, result }: PreviewPanelProps) {
-  const [showDetails, setShowDetails] = useState(false);
+        {/* Generated Summary Scrollbox */}
+        <div className="flex-1 sa-card border-none bg-white/[0.02] p-8 overflow-y-auto space-y-8 relative">
+          <div className="flex items-center gap-2 pb-4 border-b border-white/5 opacity-30">
+             <div className="h-[1px] flex-1 bg-white" />
+             <span className="text-[9px] font-bold uppercase tracking-[0.3em] whitespace-nowrap">Generated Summary</span>
+             <div className="h-[1px] flex-1 bg-white" />
+          </div>
 
-  return (
-    <div className="flex flex-col h-full bg-card/30 border-l border-border animate-in fade-in duration-700">
-      <div className="p-4 border-b border-border bg-background/50 flex items-center justify-between">
-        <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Briefing Preview</h3>
-        <Button 
-          size="sm" 
-          variant="outline" 
-          onClick={onPreview} 
-          disabled={isLoading}
-          className="h-8 gap-2 border-primary/20 hover:bg-primary/5 text-primary"
-        >
-          {isLoading ? (
-            <Clock className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Eye className="w-3.5 h-3.5" />
-          )}
-          Preview Plan
-        </Button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {!result ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center space-y-4 px-6 grayscale">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-              <LayoutList className="w-8 h-8 text-muted-foreground/30" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-muted-foreground">No preview generated yet</p>
-              <p className="text-xs text-muted-foreground/60 leading-relaxed">
-                Click the preview button to see how your briefing will be structured based on current settings.
+          <div className="space-y-10 prose prose-invert max-w-none">
+            <section className="space-y-3">
+              <h4 className="text-white text-lg font-extrabold flex items-center gap-3">
+                <div className="w-1 h-3 bg-[#5789FF] rounded-full" />
+                Infrastructure Signal:
+              </h4>
+              <p className="text-muted-foreground text-sm leading-[1.8] pl-4 italic">
+                "Critical vulnerabilities detected in Kubernetes v1.28 cluster. Patches required for all edge nodes before 09:00 UTC."
               </p>
+            </section>
+
+            <section className="space-y-3">
+              <h4 className="text-white text-lg font-extrabold flex items-center gap-3">
+                <div className="w-1 h-3 bg-[#5789FF] rounded-full" />
+                AI Research:
+              </h4>
+              <p className="text-muted-foreground text-sm leading-[1.8] pl-4">
+                LangChain released a major update to memory orchestration. This could reduce our LLM latency by approximately 14%.
+              </p>
+            </section>
+
+            <section className="space-y-3">
+              <h4 className="text-white text-lg font-extrabold flex items-center gap-3">
+                <div className="w-1 h-3 bg-[#5789FF] rounded-full" />
+                Industry Outlook:
+              </h4>
+              <p className="text-muted-foreground text-sm leading-[1.8] pl-4">
+                Competitor A has pivot to vertical AI integration. Recommend shifting focus of Q3 sprint to automated reasoning modules.
+              </p>
+            </section>
+
+            <div className="pt-6 animate-pulse">
+               <p className="text-[11px] text-[#5789FF]/60 font-medium italic">Processing Gmail threads for project 'Phoenix'...</p>
             </div>
           </div>
-        ) : (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Stats Summary */}
-            <div className="grid grid-cols-2 gap-3">
-              <Card className="p-3 bg-secondary/50 border-border">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Total Segments</p>
-                <p className="text-2xl font-bold text-foreground">{result.total_segments}</p>
-              </Card>
-              <Card className="p-3 bg-secondary/50 border-border">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Status</p>
-                <div className="flex items-center gap-1.5 text-emerald-500 font-bold text-sm">
-                  <CheckCircle2 className="w-4 h-4" /> Ready
-                </div>
-              </Card>
-            </div>
+        </div>
 
-            {/* Connector Warnings */}
-            {(result.missing_connectors.length > 0 || result.stale_connectors.length > 0) && (
-              <div className="space-y-2">
-                <p className="text-[10px] font-bold text-destructive uppercase tracking-widest">Connectivity Alerts</p>
-                {result.missing_connectors.map(c => (
-                  <div key={c} className="flex items-center gap-2 text-[11px] text-destructive bg-destructive/5 p-2 rounded-lg border border-destructive/10">
-                    <AlertTriangle className="w-3 h-3" />
-                    Missing source: <span className="font-bold underline cursor-pointer">{c}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Segment List */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Planned Timeline</p>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground">Show Details</span>
-                  <input
-                    type="checkbox"
-                    checked={showDetails}
-                    onChange={(e) => setShowDetails(e.target.checked)}
-                    className="w-3 h-3 rounded-full border-border bg-background"
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                {result.segments.map((seg, i) => (
-                  <div key={i} className="group p-3 rounded-xl bg-background border border-border shadow-sm hover:border-primary/30 transition-all">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-6 h-6 rounded-lg bg-secondary flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0 border border-border">
-                          {i + 1}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-bold text-foreground truncate">{seg.title}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-tighter">{seg.type}</p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {showDetails && seg.grounding_source_ids.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-border space-y-1.5">
-                        <p className="text-[8px] font-bold text-muted-foreground uppercase">Grounding Sources</p>
-                        <div className="flex flex-wrap gap-1">
-                          {seg.grounding_source_ids.map(id => (
-                            <span key={id} className="text-[8px] font-mono bg-muted px-1 rounded truncate max-w-[120px]">
-                              {id}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Action Buttons */}
+        <div className="grid grid-cols-2 gap-4 pb-4">
+           <Button variant="outline" className="h-16 bg-white/[0.02] border-white/5 text-muted-foreground hover:bg-white/5 hover:text-white rounded-2xl font-bold uppercase tracking-widest text-xs flex items-center gap-3">
+              <Save className="w-4 h-4" /> Save Draft
+           </Button>
+           <Button className="h-16 sa-button-primary rounded-2xl font-bold uppercase tracking-widest text-xs flex items-center gap-3 shadow-[0_10px_30px_rgba(87,137,255,0.3)]">
+              <CheckCircle2 className="w-4 h-4" /> Finalize
+           </Button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  // Fallback...
+  return null;
 }

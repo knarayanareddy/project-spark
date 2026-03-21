@@ -7,6 +7,8 @@ import AppShell from "./components/layout/AppShell";
 import Today from "./pages/Today.tsx";
 import Connectors from "./pages/Connectors.tsx";
 import BriefingBuilder from "./pages/BriefingBuilder.tsx";
+import DevMode from "./pages/DevMode.tsx";
+import Vault from "./pages/Vault.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -41,6 +43,8 @@ const App = () => (
             <Route path="/today" element={<Today />} />
             <Route path="/builder" element={<BriefingBuilder />} />
             <Route path="/connectors" element={<Connectors />} />
+            <Route path="/vault" element={<Vault />} />
+            <Route path="/dev-mode" element={<DevMode />} />
             <Route path="/reading-list" element={<ReadingList />} />
             <Route path="/history" element={<History />} />
           </Route>
