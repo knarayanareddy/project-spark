@@ -146,3 +146,55 @@ Enable the morning briefing to be generated from real data sources (RSS, GitHub,
 - **Encryption**: GitHub PATs (if used for demo) are stored encrypted or via Supabase Secrets.
 - **Minimization**: Never store full email bodies. Only IDs + snippets.
 - **Sanitization**: All ingested content is redacted via `sanitizeDeep` before LLM/Logs/DB Display.
+
+---
+
+# Milestone 4 — Connector Security + Rich Segments
+
+## Objective
+Make the Morning Briefing Bot safer (no plaintext tokens), more correct (canonical schema + grounding validated end-to-end), more “product-like” (richer deterministic planning segments), and more connector-real (RSS IDs stable/safe; GitHub query correct; optional Gmail MVP).
+
+## 📂 Token Storage & Security
+- **No Client SELECT**: Connector secrets (PATs, tokens) will move to a strictly Service-Role-only table (`connector_secrets`).
+- **Encryption**: Secrets are encrypted server-side using AES-GCM and a `CONNECTOR_SECRET_KEY` environment variable before insertion.
+- **Data Model Changes**:
+  - `supabase/migrations/20260321160000_connector_secrets.sql` (NEW) - Creates the `connector_secrets` table.
+- **Edge Functions**:
+  - `supabase/functions/set-connector-secret/index.ts` (NEW) - Endpoints to securely encrypt and store tokens.
+  - `supabase/functions/_shared/crypto.ts` (NEW) - AES-GCM encryption helpers.
+- **UI Changes**: `src/pages/Connectors.tsx` will be modified to call `set-connector-secret` instead of directly upserting plaintext PATs into `connector_connections`.
+
+## 🛡️ Stable Source IDs
+- **Problem**: `btoa()` can throw on unicode and create collisions.
+- **Solution**: Replace `btoa()` with a SHA-256 hex digest helper (`stableId.ts`).
+- **Files Modified**: 
+  - `supabase/functions/_shared/stableId.ts` (NEW)
+  - `supabase/functions/sync-news/index.ts`
+  - `supabase/functions/sync-github/index.ts`
+
+## 🚀 Richer, Deterministic Planning
+- **Problem**: Planner produces a 1:1 segment item mapping, hallucinates action card placeholders, and generates wrapping segments with unbound IDs.
+- **Solution**: 
+  - Introduce `_digest` segment types.
+  - Dynamically populate real action links (`is_active: true`) or strictly remove them (`is_active: false`).
+  - Constrain `runware_b_roll_prompt` hints to only highly-cinematic segments.
+- **Files Modified**: `supabase/functions/_shared/planner.ts`.
+
+## 🧠 Realizer & Generate-Script Hardening
+- **Problem**: LLM prompt injects unstructured data and can randomly deviate from the schema.
+- **Solution**: Refactor `realizer.ts` strictly to use structured messages enforcing `ui_action_card` immutability and allowing nullable `runware_b_roll_prompt`.
+- **Validation**: `generate-script` will rigorously validate the final script and grounding IDs.
+- **Files Modified**: 
+  - `supabase/functions/_shared/realizer.ts`
+  - `supabase/functions/generate-script/index.ts`
+
+## 📧 Gmail Metadata-Only Hook (Feature Flag)
+- Implement MVP `sync-gmail` behind `ENABLE_GMAIL` flag. Only extracts IDs, snippet, subject, sender. No email bodies.
+
+## ✅ Acceptance Checklist
+- [ ] Connectors UI accurately uses `set-connector-secret` (no direct DB upserts).
+- [ ] Plaintext PAT is completely absent from all DB tables readable by an authenticated user.
+- [ ] RSS sync successfully handles unicode payloads using the new `stableSourceId` helper.
+- [ ] Generated Briefings exhibit deterministic "Digest" segments rather than strict 1:1 mapping.
+- [ ] All action payloads in the `ui_action_card` are either valid URLs or disabled. No `#` placeholders.
+- [ ] Script successfully validates against `validateBriefingScript` on generation.
