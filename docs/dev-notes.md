@@ -280,3 +280,31 @@ Refactor `planner.ts` so that segment generation is driven by the profile's `ena
 - Every `grounding_source_ids` entry **must** be a `source_id` present in `user_data`.
 - The wrap segment references only `source_ids` emitted by earlier plans.
 - No `action_payload` of `"#"` — use `is_active: false` + `action_payload: ""` when no real URL exists.
+
+---
+
+# Milestone 5D — Profile-Driven generate-script + Module State Updates
+
+## Objective
+Wire `generate-script` to accept a `profile_id`, internally assemble data via `assemble-user-data`, run the module-driven planner, realize segments with a tightened realizer, validate the full script, then **atomically** update `briefing_module_state.last_seen_at` per enabled module only on success.
+
+## Request Shape
+```
+POST generate-script
+{ profile_id?: string, user_preferences?: object, user_data?: object }
+```
+- If `profile_id` present → server fetches the profile + calls assemble-user-data internally.
+- If absent → falls back to caller-supplied `user_data` (mock mode unchanged).
+
+## Realizer Tightening
+- Structured system+user message split — system enforces schema; user message carries facts only.
+- `ui_action_card` is ALWAYS post-overwritten from `plan.ui_action_suggestion` — LLM cannot mutate it.
+- `runware_b_roll_prompt` forced to `null` when `b_roll_hint` is null.
+- If LLM output fails Zod parse: one repair call, then deterministic code fallback.
+
+## Module State Update Contract
+- `briefing_module_state` is upserted **only** after `briefing_scripts` INSERT succeeds.
+- Per-module timestamps:
+  - `ai_news_delta`: `last_seen_at` = newest `published_time_iso` of included news items (or `now()`).
+  - `github_prs`, `inbox_triage`, all others: `last_seen_at` = `now()`.
+- Failure at any point before INSERT → no state update → next run re-fetches same window.
