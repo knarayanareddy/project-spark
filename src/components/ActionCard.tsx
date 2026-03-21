@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Mail, Cloud, Calendar, Code, Link as LinkIcon } from "lucide-react";
+import { ExternalLink, Mail, Cloud, Calendar, Code, Link as LinkIcon, Bookmark, Check } from "lucide-react";
+import { useState } from "react";
+import { addToReadingList } from "@/lib/api";
 
 interface ActionCardData {
   is_active: boolean;
@@ -23,6 +25,7 @@ const iconMap: Record<string, React.ReactNode> = {
   jira_open: <ExternalLink className="w-5 h-5" />,
   github_review: <Code className="w-5 h-5" />,
   weather_widget: <Cloud className="w-5 h-5" />,
+  save_reading_list: <Bookmark className="w-5 h-5" />,
 };
 
 export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: ActionCardProps) {
@@ -34,7 +37,23 @@ export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: Acti
     );
   }
 
-  const handleAction = () => {
+  const [isSaved, setIsSaved] = useState(false);
+
+  const handleAction = async () => {
+    if (card.card_type === "save_reading_list") {
+      try {
+        await addToReadingList({
+          source_id: card.action_payload || "unknown",
+          title: card.title || "Untitled Item",
+          url: card.action_payload || "#",
+        });
+        setIsSaved(true);
+      } catch (e) {
+        console.error("Failed to save to reading list:", e);
+      }
+      return;
+    }
+
     if (card.card_type === "email_reply") {
       // For hackathon: just open mailto
       if (card.action_payload) window.open(card.action_payload, "_blank");
@@ -59,9 +78,15 @@ export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: Acti
       <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-3">{dialogue}</p>
 
       {!isWeather && card.action_button_text && (
-        <Button variant="glow" size="sm" className="w-full" onClick={handleAction}>
-          {iconMap[card.card_type || ""] || <ExternalLink className="w-4 h-4" />}
-          {card.action_button_text}
+        <Button 
+          variant={isSaved ? "success" : "glow"} 
+          size="sm" 
+          className="w-full" 
+          onClick={handleAction}
+          disabled={isSaved}
+        >
+          {isSaved ? <Check className="w-4 h-4" /> : (iconMap[card.card_type || ""] || <ExternalLink className="w-4 h-4" />)}
+          {isSaved ? "Saved to List" : card.action_button_text}
         </Button>
       )}
 

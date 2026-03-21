@@ -336,3 +336,26 @@ A polished `/briefing-builder` page where users select modules, configure per-mo
 ## Security
 - No secrets stored in localStorage — only `profile_id` (UUID).
 - No connector tokens ever passed through UI state.
+
+---
+
+# Milestone 5F — Production Hardening
+
+## Objective
+Add safety rails for cost and security, expand actions without write-back risk, and improve system observability.
+
+## 📂 Usage & Quotas
+- **`briefing_usage_limits`**: Tracks `generate_count` and `render_count` per user per day.
+- **Enforcement**: `generate-script` and `start-render` check quotas before processing and return `429 Too Many Requests` when exceeded.
+
+## 🛡️ Audit Logging
+- **`audit_events`**: Logs internal-key and user-driven events: `generate_script`, `start_render`, `sync_news`, `sync_github`, `sync_gmail`, `set_connector_secret`.
+- **Privacy**: No tokens, PII, or sensitive metadata are logged.
+
+## 🚀 Action Card Expansion (Save to Reading List)
+- **`save_reading_list`**: New canonical `card_type`.
+- **`reading_list` table**: Stores `user_id`, `source_id`, `title`, `url`.
+- **RLS**: Strictly owner-access only.
+
+## 🔄 Background Sync
+- **Sync on Generate**: `generate-script` triggers a background `sync-news` run to ensure fresh content without blocking the user.

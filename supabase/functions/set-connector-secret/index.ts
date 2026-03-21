@@ -4,6 +4,7 @@ import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
 import { encryptString } from "../_shared/crypto.ts";
 import { redactSecrets } from "../_shared/sanitize.ts";
+import { logAudit } from "../_shared/usage.ts";
 
 validateConfig();
 
@@ -68,6 +69,9 @@ serve(async (req: Request) => {
       }, { onConflict: "user_id, provider" });
 
     if (connErr) throw connErr;
+
+    // ── Audit Logging
+    await logAudit(supabase, userId, "set_connector_secret", { provider });
 
     return new Response(JSON.stringify({ ok: true, message: "Token strongly encrypted & protected." }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }

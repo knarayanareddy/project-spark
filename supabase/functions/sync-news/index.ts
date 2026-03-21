@@ -5,6 +5,7 @@ import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
 import { sanitizeDeep, redactSecrets } from "../_shared/sanitize.ts";
 import { stableSourceId } from "../_shared/stableId.ts";
+import { logAudit } from "../_shared/usage.ts";
 
 validateConfig();
 
@@ -97,6 +98,9 @@ serve(async (req: Request) => {
     await supabase
       .from("briefing_user_state")
       .upsert({ user_id: userId, last_news_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
+
+    // 5. Audit Logging
+    await logAudit(supabase, userId || null, "sync_news", { items_synced: syncedItems.length });
 
     return new Response(JSON.stringify({ 
       ok: true, 

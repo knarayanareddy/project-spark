@@ -114,6 +114,102 @@ export type Database = {
           },
         ]
       }
+      briefing_usage_limits: {
+        Row: {
+          user_id: string
+          day: string
+          generate_count: number
+          render_count: number
+        }
+        Insert: {
+          user_id: string
+          day?: string
+          generate_count?: number
+          render_count?: number
+        }
+        Update: {
+          user_id?: string
+          day?: string
+          generate_count?: number
+          render_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "briefing_usage_limits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      audit_events: {
+        Row: {
+          id: string
+          user_id: string | null
+          event_type: string
+          created_at: string
+          metadata: Json
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          event_type: string
+          created_at?: string
+          metadata?: Json
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          event_type?: string
+          created_at?: string
+          metadata?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reading_list: {
+        Row: {
+          id: string
+          user_id: string
+          source_id: string
+          title: string
+          url: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          source_id: string
+          title: string
+          url: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          source_id?: string
+          title?: string
+          url?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reading_list_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

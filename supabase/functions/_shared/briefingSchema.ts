@@ -9,6 +9,7 @@ export const ActionCardSchema = z.object({
     "github_review",
     "jira_open",
     "link_open",
+    "save_reading_list",
   ]),
   title: z.string(),
   action_button_text: z.string(),

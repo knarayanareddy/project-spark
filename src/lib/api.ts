@@ -136,3 +136,21 @@ export async function upsertProfile(profile: Partial<BriefingProfile>) {
 export async function deleteProfile(id: string) {
   return callEdgeFunction<{ success: boolean }>("delete-profile", { body: { id } });
 }
+
+export async function addToReadingList(item: { source_id: string; title: string; url: string }) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session) throw new Error("Authentication required to save items.");
+
+  const { error } = await supabase
+    .from("reading_list")
+    .insert({
+      user_id: sessionData.session.user.id,
+      ...item
+    });
+
+  if (error) {
+    if (error.code === "23505") return { ok: true, message: "Already in reading list" };
+    throw error;
+  }
+  return { ok: true };
+}

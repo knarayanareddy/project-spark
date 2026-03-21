@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
 import { processNextSegments } from "../_shared/renderPipeline.ts";
+import { logAudit, checkLimitExceeded } from "../_shared/usage.ts";
 
 validateConfig();
 
@@ -38,6 +39,20 @@ serve(async (req) => {
       config.SUPABASE_URL!,
       config.SUPABASE_SERVICE_ROLE_KEY!
     );
+    const userId = auth.user_id!;
+
+    // ── PHASE 0: Usage Limits ────────────────────────────────────────────────
+    const RENDER_LIMIT = parseInt(Deno.env.get("DAILY_RENDER_LIMIT") || "10");
+    const { exceeded, current } = await checkLimitExceeded(supabase, userId, "render", RENDER_LIMIT);
+    
+    if (exceeded) {
+      return new Response(JSON.stringify({ 
+        error: "rate_limit_exceeded", 
+        message: `Daily rendering limit reached (${current}/${RENDER_LIMIT}). Please try again tomorrow.` 
+      }), {
+        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
 
     // 1. Fetch script and segments
     const { data: scriptData, error: scriptErr } = await supabase
@@ -101,6 +116,9 @@ serve(async (req) => {
       // Best effort if not on EdgeRuntime
       runBackgroundRender();
     }
+
+    // 4b. Audit Logging
+    await logAudit(supabase, userId, "start_render", { job_id: job.id, script_id });
 
     // 5. Fast Return
     return new Response(JSON.stringify({ job_id: job.id, status: "started" }), {

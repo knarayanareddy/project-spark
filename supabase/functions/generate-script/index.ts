@@ -9,6 +9,7 @@ import { realizeSegment, repairSegment } from "../_shared/realizer.ts";
 import { BriefingSegmentSchema, validateBriefingScript } from "../_shared/briefingSchema.ts";
 import { AssembledUserData } from "../_shared/userData.ts";
 import { MODULE_CATALOG, ModuleId } from "../_shared/moduleCatalog.ts";
+import { logAudit, checkLimitExceeded } from "../_shared/usage.ts";
 
 validateConfig();
 
@@ -27,6 +28,19 @@ serve(async (req: Request) => {
 
   const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
   const userId = auth.user_id!;
+
+  // ── PHASE 0: Usage Limits ────────────────────────────────────────────────
+  const GEN_LIMIT = parseInt(Deno.env.get("DAILY_GENERATE_LIMIT") || "10");
+  const { exceeded, current } = await checkLimitExceeded(supabase, userId, "generate", GEN_LIMIT);
+  
+  if (exceeded) {
+    return new Response(JSON.stringify({ 
+      error: "rate_limit_exceeded", 
+      message: `Daily generation limit reached (${current}/${GEN_LIMIT}). Please try again tomorrow.` 
+    }), {
+      status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -174,6 +188,36 @@ serve(async (req: Request) => {
       .select().single();
 
     if (dbErr) throw dbErr;
+
+    // ── PHASE 4b: Audit Logging ─────────────────────────────────────────────
+    await logAudit(supabase, userId, "generate_script", { 
+      script_id: scriptData.id, 
+      profile_id,
+      segments_count: timeline_segments.length 
+    });
+
+    // ── PHASE 4c: Background Sync Trigger (Best-effort news refresh) ─────────
+    const syncNewsRef = async () => {
+      try {
+        const syncUrl = `${config.SUPABASE_URL}/functions/v1/sync-news`;
+        await fetch(syncUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
+            "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+          }
+        });
+      } catch (err) {
+        console.warn("Background sync-news failed:", err);
+      }
+    };
+
+    if ((globalThis as any).EdgeRuntime?.waitUntil) {
+      (globalThis as any).EdgeRuntime.waitUntil(syncNewsRef());
+    } else {
+      syncNewsRef();
+    }
 
     // ── PHASE 5: Update per-module last_seen_at (after successful DB write) ───
     if (profile_id && enabledModules.length > 0) {

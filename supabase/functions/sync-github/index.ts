@@ -5,6 +5,7 @@ import { authorizeRequest } from "../_shared/auth.ts";
 import { sanitizeDeep, redactSecrets } from "../_shared/sanitize.ts";
 import { stableSourceId } from "../_shared/stableId.ts";
 import { decryptString } from "../_shared/crypto.ts";
+import { logAudit } from "../_shared/usage.ts";
 
 validateConfig();
 
@@ -23,7 +24,7 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const userId = auth.user_id;
+  const userId = auth.user_id!;
   const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
 
   try {
@@ -106,6 +107,14 @@ serve(async (req: Request) => {
       
       if (upsertErr) throw upsertErr;
     }
+
+    // 4. Update user state
+    await supabase
+      .from("briefing_user_state")
+      .upsert({ user_id: userId, last_github_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
+
+    // 5. Audit Logging
+    await logAudit(supabase, userId, "sync_github", { items_synced: syncedItems.length });
 
     return new Response(JSON.stringify({ 
       ok: true, 

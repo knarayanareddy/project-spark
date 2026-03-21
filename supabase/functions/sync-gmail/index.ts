@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { authorizeRequest } from "../_shared/auth.ts"
 import { config } from "../_shared/config.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { logAudit } from "../_shared/usage.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,6 +25,8 @@ serve(async (req: Request) => {
 
     // STUB: Gmail sync requires OAuth which is slated for v1.1
     // This hook is here to satisfy the Milestone 3 architectural requirement.
+    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+    await logAudit(supabase, authResult.user_id || null, "sync_gmail", { message: "Sync attempt on stub" });
     
     return new Response(JSON.stringify({ 
       ok: true, 
