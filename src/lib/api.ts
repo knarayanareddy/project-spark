@@ -185,3 +185,13 @@ export async function addToReadingList(item: { source_id: string; title: string;
   console.log("Reading list save (stub):", item);
   return { ok: true };
 }
+
+export async function getConnectorStatus() {
+  return callEdgeFunction<any>("connector-status", { method: "GET" });
+}
+
+export async function updateConnectorConfig(type: string, config: any) {
+  return callEdgeFunction<any>("update-connector-config", {
+    body: { type, config }
+  });
+}

@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getProfiles, upsertProfile, deleteProfile, getModuleCatalog } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit3, Settings, Save, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Edit3, Settings, Save, AlertCircle, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { useDevMode, isDevModeEnabled } from "@/lib/devMode";
 
 import ModuleList from "@/components/builder/ModuleList";
 import ModuleSettingsPanel from "@/components/builder/ModuleSettingsPanel";
@@ -20,19 +21,83 @@ export default function BriefingBuilder() {
   const [moduleSettings, setModuleSettings] = useState<Record<string, any>>({});
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
   const [profileName, setProfileName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [previewResult, setPreviewResult] = useState<any>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [connectorStatus, setConnectorStatus] = useState<Record<string, any>>({});
+  const { isDevMode } = useDevMode();
+  
+  // Auth state for gated screen
+  const [loginEmail, setLoginEmail] = useState("");
+  const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
 
   useEffect(() => {
+    checkSession();
+    
+    // Listen for dev mode changes to re-inject mock profiles
+    const handleDevModeSync = () => {
+      loadInitialData();
+    };
+    window.addEventListener("storage_dev_mode", handleDevModeSync);
+    window.addEventListener("storage", handleDevModeSync);
+    
+    return () => {
+      window.removeEventListener("storage_dev_mode", handleDevModeSync);
+      window.removeEventListener("storage", handleDevModeSync);
+    };
+  }, [authenticated, isDevMode]); // Re-run when these change
+
+  async function checkSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setAuthenticated(false);
+      // Even if not authenticated, if devMode is on, we still want to load initial data (for mocks)
+      if (isDevModeEnabled()) {
+        loadInitialData();
+        return;
+      }
+      setLoading(false);
+      return;
+    }
+    setAuthenticated(true);
     loadInitialData();
-  }, []);
+  }
 
   async function loadInitialData() {
     setLoading(true);
+    let profs: any[] = [];
+    let catalog: any[] = [];
+
+    // 1. Immediate Mock Injection for Dev Mode
+    if (isDevModeEnabled()) {
+      profs = [
+        { 
+          id: "mock-1", 
+          name: "Demo Executive", 
+          enabled_modules: ["rss", "github"], 
+          module_settings: {},
+          persona: "Professional Executive",
+          timezone: "UTC",
+          updated_at: new Date().toISOString()
+        }
+      ];
+    }
+
     try {
-      const [profs, catalog] = await Promise.all([getProfiles(), getModuleCatalog()]);
+      const [realProfs, realCatalog] = await Promise.all([
+        getProfiles().catch(() => []), 
+        getModuleCatalog().catch(() => [])
+      ]);
+      
+      // Merge real profiles if any (mostly for authenticated dev mode)
+      if (realProfs && realProfs.length > 0) {
+        profs = [...profs, ...realProfs];
+      }
+      catalog = realCatalog || [];
+    } catch (err: any) {
+      console.warn("Builder API failed, using mocks if available", err);
+    } finally {
       setProfiles(profs);
       setModuleCatalog(catalog);
       
@@ -42,15 +107,12 @@ export default function BriefingBuilder() {
       } else if (profs.length > 0) {
         handleProfileSelect(profs[0].id, profs);
       }
-    } catch (err: any) {
-      toast.error("Failed to load builder data");
-    } finally {
       setLoading(false);
     }
   }
 
   const handleProfileSelect = (id: string, profList = profiles) => {
-    const p = profList.find(x => x.id === id);
+    const p = (profList || []).find(x => x.id === id);
     if (!p) return;
     setSelectedProfileId(id);
     setProfileName(p.name);
@@ -121,6 +183,61 @@ export default function BriefingBuilder() {
     }
   };
 
+  const handleLoginWithEmail = async () => {
+    if (!loginEmail) return;
+    setIsSendingMagicLink(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ email: loginEmail });
+      if (error) throw error;
+      toast.success("Magic link sent! Check your inbox.");
+    } catch (err: any) {
+      toast.error("Login failed: " + err.message);
+    } finally {
+      setIsSendingMagicLink(false);
+    }
+  };
+
+  if (loading) return <div className="p-8 animate-pulse text-muted-foreground">Loading builder...</div>;
+
+  if (authenticated === false && !isDevMode) {
+    return (
+      <div className="p-8 max-w-6xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6">
+        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+           <Database className="w-8 h-8 text-muted-foreground" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold">Authentication Required</h2>
+          <p className="text-muted-foreground max-w-sm">
+            Please sign in with your email or use <b>Dev Mode</b> to access your briefing profiles.
+          </p>
+        </div>
+        
+        <div className="flex flex-col gap-3 w-full max-w-sm">
+          <Input 
+            placeholder="your@email.com" 
+            value={loginEmail} 
+            onChange={e => setLoginEmail(e.target.value)}
+            className="text-center"
+          />
+          <Button onClick={handleLoginWithEmail} disabled={isSendingMagicLink || !loginEmail} className="w-full">
+            {isSendingMagicLink ? "Sending..." : "Sign In with Email"}
+          </Button>
+          <div className="relative py-4">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border" /></div>
+            <span className="relative px-2 bg-background text-[10px] text-muted-foreground uppercase font-bold">Or</span>
+          </div>
+          <Button 
+            variant="outline"
+            onClick={() => supabase.auth.signInWithOAuth({ provider: 'github' })}
+            className="w-full border-white/10"
+          >
+            Sign In with GitHub
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const selectedModule = moduleCatalog.find(m => m.id === selectedModuleId);
 
   return (
@@ -140,6 +257,7 @@ export default function BriefingBuilder() {
                   value={selectedProfileId || ""}
                   onChange={(e) => handleProfileSelect(e.target.value)}
                 >
+                  <option value="" disabled>Select a profile</option>
                   {profiles.map(p => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
@@ -150,7 +268,7 @@ export default function BriefingBuilder() {
                   setEnabledModuleIds([]);
                   setModuleSettings({});
                 }}>
-                  <Plus className="w-4 h-4" />
+                   <Plus className="w-4 h-4" />
                 </Button>
               </div>
             </div>

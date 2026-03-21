@@ -7,7 +7,7 @@ export default function AppShell() {
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
       <SidebarNav />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <AppHeader />
+        <AppHeader onSync={() => console.log("Global sync triggered")} />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

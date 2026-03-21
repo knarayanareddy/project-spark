@@ -1,8 +1,23 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, assembleUserData, getProfiles, upsertProfile, syncRequiredConnectors, type SegmentStatus, type BriefingProfile } from "@/lib/api";
+import { 
+  generateScript, 
+  startRender, 
+  getJobStatus, 
+  setInternalApiKey, 
+  assembleUserData, 
+  syncRequiredConnectors, 
+  type SegmentStatus 
+} from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { mockScriptJson } from "@/lib/mockData";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { 
+  Accordion, 
+  AccordionContent, 
+  AccordionItem, 
+  AccordionTrigger 
+} from "@/components/ui/accordion";
+import { Database } from "lucide-react";
+import { useDevMode } from "@/lib/devMode";
 
 import SegmentTimeline from "@/components/today/SegmentTimeline";
 import VideoStage from "@/components/today/VideoStage";
@@ -13,7 +28,8 @@ import BriefEmptyState from "@/components/today/BriefEmptyState";
 type AppState = "idle" | "generating" | "script_ready" | "rendering" | "ready" | "playing";
 
 export default function Today() {
-  const [state, setState] = useState<AppState>("idle");
+  const { isDevMode } = useDevMode();
+  const [appState, setAppState] = useState<AppState>("idle");
   const [useMock, setUseMock] = useState(true);
   const [scriptId, setScriptId] = useState<string | null>(null);
   const [scriptJson, setScriptJson] = useState<any>(null);
@@ -24,20 +40,17 @@ export default function Today() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState("");
-  const [isResuming, setIsResuming] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasSession, setHasSession] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    localStorage.getItem("selectedProfileId") === "mock-default" ? null : (localStorage.getItem("selectedProfileId") || null)
-  );
+  const selectedProfileId = localStorage.getItem("selectedProfileId");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setHasSession(!!session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setHasSession(!!s));
+    supabase.auth.getSession().then(({ data: { session } }) => setHasSession(!!session || isDevMode));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setHasSession(!!s || isDevMode));
     return () => subscription.unsubscribe();
-  }, []);
+  }, [isDevMode]);
 
   const addError = (e: string) => setErrors((prev) => [...prev, e]);
 
@@ -54,7 +67,7 @@ export default function Today() {
   };
 
   const handleGenerateScript = useCallback(async () => {
-    setState("generating");
+    setAppState("generating");
     setErrors([]);
     setScriptJson(null);
     setSegments([]);
@@ -76,7 +89,7 @@ export default function Today() {
         }));
         setSegments(mockSegs);
         setCurrentIdx(0);
-        setState("script_ready");
+        setAppState("script_ready");
       } else {
         if (!apiKey && !hasSession) throw new Error("Authentication required for live mode");
         if (apiKey) setInternalApiKey(apiKey);
@@ -97,17 +110,17 @@ export default function Today() {
           error: null,
         }));
         setSegments(initialSegs);
-        setState("script_ready");
+        setAppState("script_ready");
       }
     } catch (e: any) {
       addError(e.message);
-      setState("idle");
+      setAppState("idle");
     }
   }, [useMock, apiKey, hasSession, selectedProfileId]);
 
   const handleRender = useCallback(async () => {
     if (!scriptId) return;
-    setState("rendering");
+    setAppState("rendering");
     try {
       if (useMock) {
         for (let i = 0; i < segments.length; i++) {
@@ -121,7 +134,7 @@ export default function Today() {
           setProgress({ percent_complete: Math.round(((i + 1) / segments.length) * 100), complete: i + 1, total: segments.length });
         }
         setJobStatus("complete");
-        setState("ready");
+        setAppState("ready");
       } else {
         const res = await startRender(scriptId);
         setJobId(res.job_id);
@@ -136,7 +149,7 @@ export default function Today() {
             if (status.progress) setProgress(status.progress);
             if (status.status === "complete" || status.status === "failed") {
               if (pollRef.current) clearInterval(pollRef.current);
-              setState(status.status === "complete" ? "ready" : "idle");
+              setAppState(status.status === "complete" ? "ready" : "idle");
             }
           } catch (e: any) {
             addError("Polling error: " + e.message);
@@ -145,7 +158,7 @@ export default function Today() {
       }
     } catch (e: any) {
       addError(e.message);
-      setState("script_ready");
+      setAppState("script_ready");
     }
   }, [scriptId, useMock, segments]);
 
@@ -153,12 +166,12 @@ export default function Today() {
     if (currentIdx < segments.length - 1) {
       setCurrentIdx(currentIdx + 1);
     } else {
-      setState("ready");
+      setAppState("ready");
     }
   };
 
   const handlePlay = () => {
-    setState("playing");
+    setAppState("playing");
     setCurrentIdx(0);
   };
 
@@ -167,7 +180,6 @@ export default function Today() {
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden animate-in fade-in duration-1000">
       <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
-        
         {/* Left column: Timeline */}
         <div className="md:col-span-3 hidden md:block overflow-hidden">
           <SegmentTimeline 
@@ -185,7 +197,7 @@ export default function Today() {
           {segments.length === 0 ? (
             <BriefEmptyState 
               onGenerate={handleGenerateScript} 
-              isGenerating={state === "generating"} 
+              isGenerating={appState === "generating"} 
             />
           ) : (
             <div className="flex-1 flex flex-col overflow-y-auto p-8 space-y-6">
@@ -196,7 +208,7 @@ export default function Today() {
                 progress={progress}
                 onEnded={handleVideoEnd}
                 onSkip={() => setCurrentIdx(prev => Math.min(prev + 1, segments.length - 1))}
-                isPlaying={state === "playing"}
+                isPlaying={appState === "playing"}
                 segmentLabel={`Segment ${currentIdx + 1}: ${(scriptJson as any)?.timeline_segments?.[currentIdx]?.segment_type || "processing"}`}
               />
 
@@ -216,7 +228,7 @@ export default function Today() {
 
           {segments.length > 0 && (
             <BriefControls 
-              state={state}
+              state={appState}
               onGenerate={handleGenerateScript}
               onRender={handleRender}
               onPlay={handlePlay}
@@ -235,16 +247,22 @@ export default function Today() {
         </div>
       </div>
 
-      {/* Developer Details Panel */}
-      <div className="border-t border-border bg-card/10 px-6 py-2">
-        <Accordion type="single" collapsible className="w-full">
-          <AccordionItem value="debug" className="border-none">
-            <AccordionTrigger className="py-2 text-[10px] text-muted-foreground hover:no-underline uppercase tracking-widest font-bold">
-              Technical Details & Debug
-            </AccordionTrigger>
-            <AccordionContent className="pt-4 space-y-4">
-              <div className="flex items-center gap-4 mb-4">
-                 <button
+      {/* Developer Details Panel (Gated) */}
+      {isDevMode && (
+        <div className="border-t border-border bg-card/10 px-6 py-2">
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="technical" className="border-none">
+              <AccordionTrigger className="hover:no-underline py-2 px-4 rounded-lg bg-muted/50 border border-border group">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground group-hover:text-foreground transition-colors">
+                    Technical Details & Debug
+                  </span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="pt-4 space-y-4">
+                <div className="flex items-center gap-4 mb-4">
+                  <button
                     onClick={() => setUseMock(!useMock)}
                     className={`h-7 px-3 text-[10px] rounded-md border transition-all font-mono ${
                       useMock ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500" : "bg-secondary border-border text-muted-foreground"
@@ -255,28 +273,29 @@ export default function Today() {
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-muted-foreground font-mono">Profile: {selectedProfileId || "NONE"}</span>
                   </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 h-64">
-                <div className="bg-black/80 rounded-lg p-3 overflow-auto">
-                   <p className="text-[9px] font-bold text-primary mb-2">SCRIPT_JSON</p>
-                   <pre className="text-[9px] font-mono text-emerald-400">
-                     {JSON.stringify(scriptJson, null, 2)}
-                   </pre>
                 </div>
-                <div className="bg-black/80 rounded-lg p-3 overflow-auto">
-                   <p className="text-[9px] font-bold text-primary mb-2">ERRORS_LOG</p>
-                   <div className="space-y-1">
-                     {errors.map((e, i) => (
-                       <p key={i} className="text-[9px] font-mono text-red-400">[{i}] {e}</p>
-                     ))}
-                     {errors.length === 0 && <p className="text-[9px] font-mono text-muted-foreground italic">No errors in current session</p>}
-                   </div>
+                <div className="grid grid-cols-2 gap-4 h-64 overflow-hidden">
+                  <div className="bg-black/80 rounded-lg p-3 overflow-auto">
+                    <p className="text-[9px] font-bold text-primary mb-2 uppercase">Script Content</p>
+                    <pre className="text-[9px] font-mono text-emerald-400">
+                      {JSON.stringify(scriptJson, null, 2)}
+                    </pre>
+                  </div>
+                  <div className="bg-black/80 rounded-lg p-3 overflow-auto">
+                    <p className="text-[9px] font-bold text-primary mb-2 uppercase">Errors/Logs</p>
+                    <div className="space-y-1">
+                      {errors.map((e, i) => (
+                        <p key={i} className="text-[9px] font-mono text-red-400">[{i}] {e}</p>
+                      ))}
+                      {errors.length === 0 && <p className="text-[9px] font-mono text-muted-foreground italic">No errors in current session</p>}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-      </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+      )}
     </div>
   );
 }

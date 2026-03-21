@@ -5,21 +5,26 @@ A production-grade, secure AI orchestration system for generating personalized "
 ## 🌟 Features
 
 - **Secure Orchestration**: All AI calls and provider interactions happen server-side (Supabase Edge Functions).
-- **Canonical Schema**: Strict adherence to a stable JSON structure for cross-component reliability.
-- **Provider Adapters**: Professional-grade adapters for **fal.ai** (TTS + AI-Avatar) and **Runware** (B-roll images).
-- **Zod Validation**: No silent failures; all AI outputs are validated against strict rules (sequential IDs, grounding checks).
+- **Modern App Shell**: Consistent sidebar navigation and header with integrated profile/auth management.
+- **3-Pane Briefing Builder**: Advanced layout for profile selection, module configuration, and real-time briefing preview.
+- **Connectors & Health**: Centralized hub for RSS, GitHub, and Gmail connectors with health monitoring and secure secret management.
+- **Developer Mode**: Seamless UI gating for debug panels and raw metadata, with cross-tab state synchronization.
+- **Authentication Resilience**: Robust fallback to Email OTP sign-in and Dev Mode bypass for unauthenticated previews.
 - **AppSec Hardening**:
+  - **Vault-based Secrets**: PATs and keys are stored in Supabase Vault, never exposed to the UI.
   - **RLS Lockdown**: Tables restricted to Service Role only.
-  - **Deep Sanitization**: Automatic redaction of secrets (API keys, tokens) and PII from user data and logs.
+  - **Deep Sanitization**: Automatic redaction of secrets and PII from user data and logs.
 
 ## 🏗️ Architecture
 
-- **Frontend**: React, Vite, Tailwind, Shadcn/UI.
+- **Frontend**: React, Vite, Tailwind, Shadcn/UI (Radix primitives).
+- **State Management**: Zero-config `localStorage` sync via custom events for Developer Mode.
 - **Database**: Supabase (PostgreSQL) with RLS enabled.
 - **Edge Functions**:
   - `generate-script`: LLM orchestration with deep sanitization.
   - `start-render`: Sequential media rendering pipeline with error isolation.
-  - `job-status`: Real-time status polling.
+  - `sync-required-connectors`: Automated fetching and health checking for third-party data.
+  - `set-connector-secret`: Secure write-only endpoint for storing encrypted tokens.
 
 ## 🚀 Setup & Deployment
 
