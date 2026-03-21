@@ -1,38 +1,51 @@
-# Morning Briefing Bot
+# Morning Briefing Bot (Refactored)
 
-An AI-powered "Executive Briefing" application that generates personalized video briefings with AI avatars, B-roll imagery, and interactive action cards.
+A production-grade, secure AI orchestration system for generating personalized "Executive Briefings". Built for hackathon reliability with strict schema stability and zero-hallucination guardrails.
 
-## 🚀 Getting Started
+## 🌟 Features
 
-### Prerequisites
-- [Bun](https://bun.sh/) or Node.js installed.
-- Supabase Project with Edge Functions enabled.
-- API keys for OpenAI, Runware, and fal.ai (or VEED).
-
-### Environment Variables
-Copy `.env.example` to `.env` and fill in the required values.
-
-### Local Development
-1. Install dependencies: `bun install`
-2. Start development server: `bun dev`
-3. Serve Supabase functions locally: `supabase functions serve`
+- **Secure Orchestration**: All AI calls and provider interactions happen server-side (Supabase Edge Functions).
+- **Canonical Schema**: Strict adherence to a stable JSON structure for cross-component reliability.
+- **Provider Adapters**: Professional-grade adapters for **fal.ai** (TTS + AI-Avatar) and **Runware** (B-roll images).
+- **Zod Validation**: No silent failures; all AI outputs are validated against strict rules (sequential IDs, grounding checks).
+- **AppSec Hardening**:
+  - **RLS Lockdown**: Tables restricted to Service Role only.
+  - **Deep Sanitization**: Automatic redaction of secrets (API keys, tokens) and PII from user data and logs.
 
 ## 🏗️ Architecture
 
-- **Frontend**: React 18, Vite, Tailwind CSS, Shadcn/UI.
-- **Backend**: Supabase Edge Functions (`generate-script`, `start-render`, `job-status`).
-- **AI Pipeline**:
-  - **Text**: OpenAI GPT-4o-mini.
-  - **Images**: Runware AI.
-  - **Video**: fal.ai (SadTalker) or VEED.io.
+- **Frontend**: React, Vite, Tailwind, Shadcn/UI.
+- **Database**: Supabase (PostgreSQL) with RLS enabled.
+- **Edge Functions**:
+  - `generate-script`: LLM orchestration with deep sanitization.
+  - `start-render`: Sequential media rendering pipeline with error isolation.
+  - `job-status`: Real-time status polling.
 
-## 🛡️ Security & Resilience
-- **Strict Validation**: All AI outputs are validated against a Zod schema.
-- **Header Auth**: Edge Functions require an `x-internal-api-key` check.
-- **Sanitization**: All user data is redacted for secrets/PII before reaching the LLM.
-- **Partial Failure**: The media rendering pipeline is resilient; if one segment fails, the rest of the job continues.
+## 🚀 Setup & Deployment
 
-## 🧪 Flow
-1. **Generate Script**: Send user prefs/data -> LLM generates JSON -> Save to DB.
-2. **Start Render**: Create job -> Render images & videos sequentially -> Update DB.
-3. **Job Status**: Poll for progress and display in the interactive playlist.
+### 1. Environment Variables
+Copy `.env.example` to `.env` and fill in:
+- `OPENAI_API_KEY`: For script generation.
+- `FAL_KEY`: For avatar video generation.
+- `RUNWARE_API_KEY`: For B-roll images.
+- `INTERNAL_API_KEY`: Secure key for Edge Function authentication.
+
+### 2. Database Migrations
+Run the migrations in `supabase/migrations/` to set up the schema and lock down RLS.
+
+### 3. Edge Functions
+Deploy via Supabase CLI:
+```bash
+supabase functions deploy generate-script --no-verify-jwt
+supabase functions deploy start-render --no-verify-jwt
+supabase functions deploy job-status --no-verify-jwt
+```
+
+## 🧪 Development Flow
+1. **Mock Mode**: Enabled by default in the UI. Uses local `mockData.ts` to simulate the full flow without API credits.
+2. **Live Mode**: Requires your `INTERNAL_API_KEY` to be entered in the UI.
+
+## 🛡️ Security Notes
+- **Never committed**: `.env` is ignored by git.
+- **Sanitization**: All user data is passed through `sanitizeDeep()` which truncates long fields and redacts common secret patterns.
+- **Validation**: If the LLM generates an invalid grounding source ID or non-sequential segments, the system rejects the output (Zero-Hallucination).

@@ -8,22 +8,27 @@ export const config = {
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
   AVATAR_PROVIDER: Deno.env.get("AVATAR_PROVIDER") || "fal",
   ENABLE_RUNWARE: Deno.env.get("ENABLE_RUNWARE") !== "false",
-  MAX_BROLL_SEGMENTS: parseInt(Deno.env.get("MAX_BROLL_SEGMENTS") || "5", 10),
+  MAX_BROLL_SEGMENTS: parseInt(Deno.env.get("MAX_BROLL_SEGMENTS") || "5"),
+  DEFAULT_AVATAR_IMAGE_URL: Deno.env.get("DEFAULT_AVATAR_IMAGE_URL") || "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=800",
 };
 
 export function validateConfig() {
-  const missing = [];
-  if (!config.INTERNAL_API_KEY) missing.push("INTERNAL_API_KEY");
+  const required = [
+    "INTERNAL_API_KEY",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ];
   
-  if (missing.length > 0) {
-    console.warn(`Critical environment variables missing: ${missing.join(", ")}`);
+  // Conditionally required
+  if (config.AVATAR_PROVIDER === "fal") required.push("FAL_KEY");
+  if (config.AVATAR_PROVIDER === "veed") required.push("VEED_API_KEY");
+  if (config.OPENAI_API_KEY === undefined) {
+     // OpenAI is usually required for generate-script, but start-render doesn't need it.
+     // We validate it in the function itself if needed.
   }
-  
-  const missingAI = [];
-  if (!config.OPENAI_API_KEY) missingAI.push("OPENAI_API_KEY");
-  if (!config.FAL_KEY && !config.VEED_API_KEY) missingAI.push("FAL_KEY or VEED_API_KEY");
-  
-  if (missingAI.length > 0) {
+
+  const missing = required.filter((key) => !config[key as keyof typeof config]);
+  if (missing.length > 0) {
     console.warn(`AI Provider keys missing: ${missingAI.join(", ")}. Fallbacks will be used.`);
   }
 }

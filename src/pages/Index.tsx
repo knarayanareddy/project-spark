@@ -38,7 +38,7 @@ export default function Index() {
         const fakeId = crypto.randomUUID();
         setScriptId(fakeId);
         setScriptJson(mockScriptJson);
-        const mockSegs: SegmentStatus[] = mockScriptJson.timeline.map((t) => ({
+        const mockSegs: SegmentStatus[] = mockScriptJson.timeline_segments.map((t) => ({
           segment_id: t.segment_id,
           avatar_video_url: null,
           b_roll_image_url: null,
@@ -59,7 +59,7 @@ export default function Index() {
         setScriptJson(res.script_json);
         
         // Populate segments from the generated script (status = queued)
-        const timeline = (res.script_json as any).timeline;
+        const timeline = (res.script_json as any).timeline_segments;
         const initialSegs: SegmentStatus[] = timeline.map((t: any) => ({
           segment_id: t.segment_id,
           avatar_video_url: null,
@@ -95,7 +95,7 @@ export default function Index() {
             idx === i ? { 
               ...s, 
               status: "complete",
-              b_roll_image_url: mockScriptJson.timeline[i].runware_b_roll_prompt
+              b_roll_image_url: mockScriptJson.timeline_segments[i].runware_b_roll_prompt
                 ? `https://picsum.photos/seed/seg${s.segment_id}/800/450`
                 : null,
             } : s
@@ -141,7 +141,7 @@ export default function Index() {
   }, []);
 
   const currentSegment = segments[currentIdx];
-  const timeline = scriptJson?.timeline;
+  const timeline = scriptJson?.timeline_segments;
 
   const handleVideoEnd = () => {
     if (currentIdx < segments.length - 1) {

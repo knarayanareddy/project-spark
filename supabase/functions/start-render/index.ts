@@ -1,10 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
-import { generateBrollImage } from "../_shared/providers/runware.ts";
-import { FalAvatarProvider } from "../_shared/providers/falAvatar.ts";
-import { VeedAvatarProvider } from "../_shared/providers/veedAvatar.ts";
-import { AvatarProvider } from "../_shared/providers/types.ts";
+import { falAvatarProvider } from "../_shared/providers/falAvatar.ts";
+import { runwareProvider } from "../_shared/providers/runware.ts";
+import { veedAvatarProvider } from "../_shared/providers/veedAvatar.ts";
 
 validateConfig();
 
@@ -28,6 +27,7 @@ serve(async (req) => {
 
   try {
     const { script_id } = await req.json();
+    if (!script_id) throw new Error("script_id is required");
 
     const supabase = createClient(
       config.SUPABASE_URL!,
@@ -35,126 +35,104 @@ serve(async (req) => {
     );
 
     // 1. Fetch script
-    const { data: script, error: scriptErr } = await supabase
+    const { data: scriptData, error: scriptErr } = await supabase
       .from("briefing_scripts")
-      .select("*")
+      .select("script_json")
       .eq("id", script_id)
       .single();
 
-    if (scriptErr || !script) throw new Error("Script not found");
-
-    const timeline = (script.script_json as any).timeline;
-    if (!timeline || !Array.isArray(timeline)) throw new Error("Invalid script timeline");
+    if (scriptErr) throw scriptErr;
+    const script = scriptData.script_json;
+    const segments = script.timeline_segments;
 
     // 2. Create render job
     const { data: job, error: jobErr } = await supabase
       .from("render_jobs")
       .insert({ script_id, status: "rendering" })
-      .select("id")
+      .select()
       .single();
 
     if (jobErr) throw jobErr;
 
-    // 3. Create segment rows
-    const segmentRows = timeline.map((seg: any) => ({
+    // 3. Initialize segments in DB
+    const initialSegments = segments.map((s: any) => ({
       job_id: job.id,
-      segment_id: seg.segment_id,
-      dialogue: seg.dialogue,
-      grounding_source_id: seg.grounding_source_id,
-      ui_action_card: seg.ui_action_card,
+      segment_id: s.segment_id,
+      dialogue: s.dialogue,
+      grounding_source_id: s.grounding_source_id,
+      ui_action_card: s.ui_action_card,
       status: "queued",
     }));
 
-    const { error: segErr } = await supabase.from("rendered_segments").insert(segmentRows);
-    if (segErr) throw segErr;
+    const { error: insErr } = await supabase
+      .from("rendered_segments")
+      .insert(initialSegments);
 
-    // 4. Initialize Provider
-    let avatarProvider: AvatarProvider;
-    if (config.AVATAR_PROVIDER === "veed" && config.VEED_API_KEY) {
-      avatarProvider = new VeedAvatarProvider();
-    } else {
-      avatarProvider = new FalAvatarProvider();
-    }
+    if (insErr) throw insErr;
 
-    // 5. Process segments sequentially (Resilient Flow)
-    let completedCount = 0;
-    
-    for (const seg of timeline) {
+    // 4. Background Rendering (Edge Function keeps running)
+    const avatarProvider = config.AVATAR_PROVIDER === "veed" ? veedAvatarProvider : falAvatarProvider;
+    let successCount = 0;
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      
+      await supabase
+        .from("rendered_segments")
+        .update({ status: "rendering" })
+        .match({ job_id: job.id, segment_id: seg.segment_id });
+
       try {
-        await supabase
-          .from("rendered_segments")
-          .update({ status: "rendering" })
-          .eq("job_id", job.id)
-          .eq("segment_id", seg.segment_id);
-
         let bRollUrl = null;
-        let avatarUrl = null;
-        let segmentError = null;
-
-        // B-Roll (Runware)
-        if (config.ENABLE_RUNWARE && seg.runware_b_roll_prompt && seg.segment_id <= config.MAX_BROLL_SEGMENTS) {
-          const res = await generateBrollImage({ prompt: seg.runware_b_roll_prompt });
-          bRollUrl = res.imageUrl;
-          if (res.error) console.warn(`Runware failed for segment ${seg.segment_id}:`, res.error);
+        if (config.ENABLE_RUNWARE && seg.runware_b_roll_prompt && i < config.MAX_BROLL_SEGMENTS) {
+          try {
+            const res = await runwareProvider.generateImage({
+              prompt: seg.runware_b_roll_prompt,
+              aspectRatio: "16:9",
+            });
+            bRollUrl = res.url;
+          } catch (e) {
+            console.error(`B-roll failed for segment ${seg.segment_id}:`, e);
+          }
         }
 
-        // Avatar Video
-        const res = await avatarProvider.generateAvatarVideo({
+        const avatarRes = await avatarProvider.generateVideo({
           dialogue: seg.dialogue,
-          persona: script.persona,
+          personaTitle: script.script_metadata.persona_applied,
         });
-        
-        avatarUrl = res.videoUrl;
-        
-        // Fallback to fal if VEED failed
-        if (!avatarUrl && config.AVATAR_PROVIDER === "veed" && config.FAL_KEY) {
-          console.info(`VEED failed for segment ${seg.segment_id}, falling back to fal.ai`);
-          const falRes = await new FalAvatarProvider().generateAvatarVideo({
-            dialogue: seg.dialogue,
-            persona: script.persona,
-          });
-          avatarUrl = falRes.videoUrl;
-          if (falRes.error) segmentError = falRes.error;
-        } else if (res.error) {
-          segmentError = res.error;
-        }
-
-        // Update segment
-        const status = avatarUrl ? "complete" : "failed";
-        if (avatarUrl) completedCount++;
 
         await supabase
           .from("rendered_segments")
           .update({
-            status,
-            avatar_video_url: avatarUrl,
+            status: "complete",
+            avatar_video_url: avatarRes.url,
             b_roll_image_url: bRollUrl,
-            error: segmentError,
           })
-          .eq("job_id", job.id)
-          .eq("segment_id", seg.segment_id);
-
+          .match({ job_id: job.id, segment_id: seg.segment_id });
+        
+        successCount++;
       } catch (e: any) {
-        console.error(`Unexpected error in segment ${seg.segment_id}:`, e.message);
+        console.error(`Rendering failed for segment ${seg.segment_id}:`, e.message);
         await supabase
           .from("rendered_segments")
-          .update({ status: "failed", error: e.message })
-          .eq("job_id", job.id)
-          .eq("segment_id", seg.segment_id);
+          .update({ 
+            status: "failed", 
+            error: e.message.slice(0, 200) // Truncate error for safety
+          })
+          .match({ job_id: job.id, segment_id: seg.segment_id });
       }
     }
 
-    // 6. Mark job status
-    const finalStatus = completedCount > 0 ? "complete" : "failed";
+    // 5. Update job status
+    const finalStatus = successCount > 0 ? "complete" : "failed";
     await supabase
       .from("render_jobs")
       .update({ status: finalStatus })
       .eq("id", job.id);
 
-    return new Response(JSON.stringify({ job_id: job.id, status: finalStatus }), {
+    return new Response(JSON.stringify({ job_id: job.id, status: "started" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-
   } catch (e: any) {
     console.error("start-render error:", e.message);
     return new Response(JSON.stringify({ error: e.message }), {

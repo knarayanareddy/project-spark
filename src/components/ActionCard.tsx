@@ -6,7 +6,7 @@ interface ActionCardData {
   card_type?: string;
   title?: string;
   description?: string;
-  action_label?: string;
+  action_button_text?: string;
   action_payload?: string;
 }
 
@@ -60,10 +60,10 @@ export function ActionCard({ card, dialogue, segmentIndex, totalSegments }: Acti
 
       <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-3">{dialogue}</p>
 
-      {!isWeather && card.action_label && (
+      {!isWeather && card.action_button_text && (
         <Button variant="glow" size="sm" className="w-full" onClick={handleAction}>
           {iconMap[card.card_type || ""] || <ExternalLink className="w-4 h-4" />}
-          {card.action_label}
+          {card.action_button_text}
         </Button>
       )}
 
