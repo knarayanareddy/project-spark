@@ -219,3 +219,38 @@ The DB remains unaware of complex catalog nuances, storing strictly user state m
 - **Connector Resolver**: Before running `assemble-user-data`, the system reads the chosen profile, fetches the enabled modules from the catalog, computes a `Set` of required connectors, and halts generation instantly if mandatory connector tokens are inactive.
 - **Data Bucket Mappings**: Instructs `assemble-user-data` to only SQL SELECT ranges directly requested by the unified `requiredUserDataBuckets` array, dropping expensive irrelevant lookups.
 - **Planner Rules (Caps)**: The `planner.ts` deterministic caps (`CAPS.github_pr: 2`) become dynamically inherited overrides derived structurally from `profile.module_settings[module_id].caps` (or resorting to the Catalog manifest baseline).
+
+---
+
+# Milestone 5B — Profile-Aware Assembly + Connector Status
+
+## Objective
+Make `assemble-user-data` profile-aware: derive required buckets from the profile's enabled modules, build grounded `connector_status[]` objects for each provider, and use per-module `last_seen_at` for delta windows.
+
+## `connector_status` Shape & Grounding
+
+Each entry is a grounded, hallucination-safe object emitted into `user_data`:
+
+```ts
+{
+  source_id: "connector_github_status",  // deterministic, no LLM involvement
+  provider: "github" | "rss" | "google" | "jira" | "calendar",
+  connected: boolean,
+  last_sync_time_iso: string | null,
+  status: "active" | "missing" | "error",
+  message: string   // safe, human-readable — sanitized before output
+}
+```
+
+- `source_id` is always `"connector_<provider>_status"` — stable, deterministic.
+- The planner reads these to emit a "connector missing" segment grounded to this `source_id`, never fabricating URLs or data.
+- `message` is code-generated (e.g. `"GitHub connector not linked."`) — never from user input.
+
+## Assembled Buckets
+- Only buckets required by `enabled_modules` are populated; all others return `[]`.
+- `ai_news_delta` → `news_items` since `briefing_module_state.last_seen_at` (or 12h ago).
+- `github_prs` → `github_prs` from `synced_items` type `github_pr`.
+- `inbox_triage` → `emails_unread` from `synced_items` type `email` (empty if connector absent).
+
+## Delta Window
+- `briefing_module_state.last_seen_at` is read here but only updated after successful briefing generation (in `generate-script`).

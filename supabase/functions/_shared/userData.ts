@@ -2,6 +2,15 @@
  * Unified shape for assembled user data from various connectors.
  * This is the input format for the Deterministic Planner.
  */
+export interface ConnectorStatus {
+  source_id: string;         // e.g. "connector_github_status" — stable, deterministic
+  provider: "rss" | "github" | "google" | "jira" | "calendar";
+  connected: boolean;
+  last_sync_time_iso: string | null;
+  status: "active" | "missing" | "error";
+  message: string;           // code-generated, never from user input
+}
+
 export interface AssembledUserData {
   calendar_events?: Array<{
     source_id: string;
@@ -53,4 +62,5 @@ export interface AssembledUserData {
     temp_c: number;
     precip_probability_pct: number;
   }>;
+  connector_status: ConnectorStatus[];
 }
