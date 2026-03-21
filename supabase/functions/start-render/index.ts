@@ -2,9 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
-import { falAvatarProvider } from "../_shared/providers/falAvatar.ts";
-import { runwareProvider } from "../_shared/providers/runware.ts";
-import { veedAvatarProvider } from "../_shared/providers/veedAvatar.ts";
+import { processNextSegments } from "../_shared/renderPipeline.ts";
 
 validateConfig();
 
@@ -13,6 +11,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key",
 };
 
+/**
+ * Start-Render Edge Function
+ * - Fast path: Initializes the job and returns job_id immediately.
+ * - Background path: Kicks off rendering via EdgeRuntime.waitUntil if available.
+ */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -36,7 +39,7 @@ serve(async (req) => {
       config.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 1. Fetch script
+    // 1. Fetch script and segments
     const { data: scriptData, error: scriptErr } = await supabase
       .from("briefing_scripts")
       .select("script_json")
@@ -47,10 +50,10 @@ serve(async (req) => {
     const script = scriptData.script_json;
     const segments = script.timeline_segments;
 
-    // 2. Create render job
+    // 2. Create/Initialize render job (Atomic)
     const { data: job, error: jobErr } = await supabase
       .from("render_jobs")
-      .insert({ script_id, status: "rendering" })
+      .insert({ script_id, status: "queued" }) // Initialized as queued
       .select()
       .single();
 
@@ -72,69 +75,38 @@ serve(async (req) => {
 
     if (insErr) throw insErr;
 
-    // 4. Background Rendering (Edge Function keeps running)
-    const avatarProvider = config.AVATAR_PROVIDER === "veed" ? veedAvatarProvider : falAvatarProvider;
-    let successCount = 0;
-
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      
-      await supabase
-        .from("rendered_segments")
-        .update({ status: "rendering" })
-        .match({ job_id: job.id, segment_id: seg.segment_id });
-
+    // 4. Background Rendering Loop
+    const runBackgroundRender = async () => {
+      console.log(`Phase 2: Starting background render for job ${job.id}`);
       try {
-        let bRollUrl = null;
-        if (config.ENABLE_RUNWARE && seg.runware_b_roll_prompt && i < config.MAX_BROLL_SEGMENTS) {
-          try {
-            const res = await runwareProvider.generateImage({
-              prompt: seg.runware_b_roll_prompt,
-              aspectRatio: "16:9",
-            });
-            bRollUrl = res.url;
-          } catch (e) {
-            console.error(`B-roll failed for segment ${seg.segment_id}:`, e);
-          }
+        let isDone = false;
+        while (!isDone) {
+          const progress = await processNextSegments(supabase, job.id, config, 1);
+          isDone = progress.isDone;
+          if (isDone) break;
+          // small pause between segments to be nice to providers
+          await new Promise(r => setTimeout(r, 500));
         }
-
-        const avatarRes = await avatarProvider.generateVideo({
-          dialogue: seg.dialogue,
-          personaTitle: script.script_metadata.persona_applied,
-        });
-
-        await supabase
-          .from("rendered_segments")
-          .update({
-            status: "complete",
-            avatar_video_url: avatarRes.url,
-            b_roll_image_url: bRollUrl,
-          })
-          .match({ job_id: job.id, segment_id: seg.segment_id });
-        
-        successCount++;
-      } catch (e: any) {
-        console.error(`Rendering failed for segment ${seg.segment_id}:`, e.message);
-        await supabase
-          .from("rendered_segments")
-          .update({ 
-            status: "failed", 
-            error: e.message.slice(0, 200) // Truncate error for safety
-          })
-          .match({ job_id: job.id, segment_id: seg.segment_id });
+        console.log(`Phase 2: Background render complete for job ${job.id}`);
+      } catch (err: any) {
+        console.error(`Phase 2: Background render failed for job ${job.id}:`, err.message);
       }
+    };
+
+    // Kick off background work
+    // Deno/Supabase Edge Functions support waitUntil
+    if ((globalThis as any).EdgeRuntime?.waitUntil) {
+      (globalThis as any).EdgeRuntime.waitUntil(runBackgroundRender());
+    } else {
+      // Best effort if not on EdgeRuntime
+      runBackgroundRender();
     }
 
-    // 5. Update job status
-    const finalStatus = successCount > 0 ? "complete" : "failed";
-    await supabase
-      .from("render_jobs")
-      .update({ status: finalStatus })
-      .eq("id", job.id);
-
+    // 5. Fast Return
     return new Response(JSON.stringify({ job_id: job.id, status: "started" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (e: any) {
     console.error("start-render error:", e.message);
     return new Response(JSON.stringify({ error: e.message }), {
