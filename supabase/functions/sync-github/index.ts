@@ -1,0 +1,110 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { config, validateConfig } from "../_shared/config.ts";
+import { authorizeRequest } from "../_shared/auth.ts";
+import { sanitizeDeep, redactSecrets } from "../_shared/sanitize.ts";
+
+validateConfig();
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key",
+};
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const userId = auth.user_id;
+  const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+
+  try {
+    // 1. Get GitHub Config (PAT and repos)
+    const { data: conn, error: connErr } = await supabase
+      .from("connector_connections")
+      .select("metadata")
+      .eq("user_id", userId)
+      .eq("provider", "github")
+      .single();
+
+    if (connErr || !conn?.metadata?.encrypted_pat) {
+      // For demo purposes, we might check connector_configs too if stored there
+      throw new Error("GitHub connection not found or PAT missing.");
+    }
+
+    // NOTE: In a real app, you'd decrypt the PAT here. 
+    // For this hackathon demo, we assume the 'encrypted_pat' is actually the PAT (labeled clearly in UI).
+    const pat = conn.metadata.encrypted_pat;
+
+    // 2. Fetch PRs assigned to user (or from specific repos)
+    // We'll use a simple search for PRs you're involved in
+    const ghResponse = await fetch("https://api.github.com/search/issues?q=is:pr+is:open+archived:false+involves:@me", {
+      headers: {
+        "Authorization": `token ${pat}`,
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Morning-Briefing-Bot"
+      }
+    });
+
+    if (!ghResponse.ok) {
+      const err = await ghResponse.text();
+      throw new Error(`GitHub API Error: ${err}`);
+    }
+
+    const prData = await ghResponse.json();
+    const syncedItems = [];
+
+    for (const pr of prData.items) {
+      const externalId = pr.node_id;
+      const stableId = `gh_pr_${pr.number}_${btoa(pr.repository_url).slice(-8)}`;
+
+      syncedItems.push({
+        user_id: userId,
+        provider: "github",
+        item_type: "github_pr",
+        external_id: externalId,
+        source_id: stableId,
+        occurred_at: pr.updated_at,
+        title: pr.title,
+        author: pr.user.login,
+        url: pr.html_url,
+        summary: pr.body?.slice(0, 500),
+        payload: sanitizeDeep({
+          repo: pr.repository_url.split("/").slice(-2).join("/"),
+          status: pr.state,
+          labels: pr.labels.map((l: any) => l.name),
+        }),
+      });
+    }
+
+    // 3. Batched Upsert
+    if (syncedItems.length > 0) {
+      const { error: upsertErr } = await supabase
+        .from("synced_items")
+        .upsert(syncedItems, { onConflict: "user_id, provider, item_type, external_id" });
+      
+      if (upsertErr) throw upsertErr;
+    }
+
+    return new Response(JSON.stringify({ 
+      ok: true, 
+      items_synced: syncedItems.length,
+      timestamp: new Date().toISOString()
+    }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+
+  } catch (e: any) {
+    console.error("sync-github error:", e.message);
+    return new Response(JSON.stringify({ error: redactSecrets(e.message) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

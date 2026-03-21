@@ -4,10 +4,11 @@ import { VideoPlayer } from "@/components/VideoPlayer";
 import { ActionCard } from "@/components/ActionCard";
 import { DebugPanel } from "@/components/DebugPanel";
 import { SegmentPlaylist } from "@/components/SegmentPlaylist";
-import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, type SegmentStatus } from "@/lib/api";
+import { generateScript, startRender, getJobStatus, triggerRenderWorker, setInternalApiKey, assembleUserData, type SegmentStatus } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { mockUserPreferences, mockUserData, mockScriptJson } from "@/lib/mockData";
-import { Loader2, Play, Clapperboard, Database, Zap, AlertCircle } from "lucide-react";
+import { Loader2, Play, Clapperboard, Database, Zap, AlertCircle, Share2, Link } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
 
 type AppState = "idle" | "generating" | "script_ready" | "rendering" | "ready" | "playing";
 
@@ -69,9 +70,15 @@ export default function Index() {
         setCurrentIdx(0);
         setState("script_ready");
       } else {
-        if (!apiKey) throw new Error("Internal API Key required for live mode");
-        setInternalApiKey(apiKey);
-        const res = await generateScript(mockUserPreferences, mockUserData);
+        if (!apiKey && !hasSession) throw new Error("Internal API Key or Session required for live mode");
+        if (apiKey) setInternalApiKey(apiKey);
+        
+        // TWO-STAGE GENERATION
+        // 1. Assemble User Data (Live from Connectors)
+        const assembled = await assembleUserData();
+        
+        // 2. Generate Script
+        const res = await generateScript(mockUserPreferences, assembled.user_data);
         setScriptId(res.script_id);
         setScriptJson(res.script_json);
         
@@ -94,7 +101,7 @@ export default function Index() {
       addError(e.message);
       setState("idle");
     }
-  }, [useMock, apiKey]);
+  }, [useMock, apiKey, hasSession]);
 
   const handleRender = useCallback(async () => {
     if (!scriptId) return;
@@ -231,6 +238,13 @@ export default function Index() {
             {useMock ? "Mock Data: ON" : "Live Mode: ON"}
           </button>
 
+          <RouterLink to="/connectors">
+            <Button variant="outline" size="sm" className="h-9 border-zinc-800 hover:bg-white/5">
+              <Share2 className="w-4 h-4 mr-2" />
+              Connect Sources
+            </Button>
+          </RouterLink>
+
           <Button
             variant={state === "script_ready" ? "outline" : "glow"}
             size="sm"
@@ -312,7 +326,7 @@ export default function Index() {
                       </span>
                       {jobStatus === "failed" && !useMock && (
                         <Button 
-                          size="xs" 
+                          size="sm" 
                           variant="outline" 
                           onClick={handleResume} 
                           disabled={isResuming}

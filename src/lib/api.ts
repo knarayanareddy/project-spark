@@ -92,3 +92,15 @@ export async function triggerRenderWorker(jobId: string, maxSegments: number = 1
     body: { job_id: jobId, max_segments: maxSegments },
   });
 }
+
+export async function syncNews() {
+  return callEdgeFunction<{ ok: boolean; items_synced: number }>("sync-news", {});
+}
+
+export async function syncGithub() {
+  return callEdgeFunction<{ ok: boolean; items_synced: number }>("sync-github", {});
+}
+
+export async function assembleUserData() {
+  return callEdgeFunction<{ user_data: unknown; meta: unknown }>("assemble-user-data", {});
+}
