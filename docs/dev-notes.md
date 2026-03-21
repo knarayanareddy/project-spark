@@ -579,3 +579,14 @@ Modernize the player experience with a three-pane dashboard layout: Timeline, Vi
 - BriefControls: Primary action bar.
 - BriefEmptyState: Onboarding view.
 
+
+# UI Milestone 3 — Builder Redesign
+
+## Overview
+Transition the Builder to a two-pane layout for streamlined profile management.
+
+## Components
+- ModuleList: Sidebar for profile selection and module discovery.
+- ModuleSettingsPanel: Dynamic configuration form for the selected module.
+- PreviewPanel: High-fidelity preview of the assembled briefing plan.
+
