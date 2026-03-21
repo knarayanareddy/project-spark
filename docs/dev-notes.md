@@ -548,3 +548,21 @@ Each rule is stored in `watch_rules` as JSON:
    - If an item matches an "include" rule, it's flagged as `high_priority`.
 3. **Planning**: The planner treats `high_priority` items as "Must Include" segments (pinned to top).
 4. **Grounding**: Since filtering happens on `synced_items` (which are already grounded), the final segments remain perfectly grounded to the original sources.
+
+# UI Milestone 1 — App Shell & Routing
+
+## Overview
+Reorganize the frontend into a structured App Shell with persistent navigation and header. Shift from hardcoded colors to shadcn/Tailwind design tokens.
+
+## New Routes
+- /today: Main briefing view (formerly index)
+- /builder: Profile & Module configuration
+- /connectors: Sync source management
+- /reading-list: Saved articles (Placeholder)
+- /history: Past briefings (Placeholder)
+
+## Components
+- AppShell: Layout wrapper.
+- SidebarNav: Left navigation.
+- AppHeader: Top bar with title, profile picker, and sync button.
+
