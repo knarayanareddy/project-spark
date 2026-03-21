@@ -1,689 +1,213 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Loader2, Zap, Settings2, Share2, CheckCircle2, AlertCircle, XCircle, ChevronDown, ChevronUp, ArrowLeft, RefreshCw, Eye } from "lucide-react";
-import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, previewPlan, getModuleCatalog, PublicModuleDefinition } from "@/lib/api";
-import { generateScript, startRender, setInternalApiKey } from "@/lib/api";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getProfiles, upsertProfile, deleteProfile, getModuleCatalog } from "@/lib/api";
+import { toast } from "sonner";
+import { Plus, Trash2, Edit3, Settings, Save, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
-const PROVIDER_LABEL: Record<string, string> = {
-  rss: "RSS", github: "GitHub", google: "Gmail", calendar: "Calendar", jira: "Jira", weather: "Weather",
-};
-
-type ConnectorStatusSummary = Array<{ provider: string; status: "active" | "missing" | "error" }>;
+import ModuleList from "@/components/builder/ModuleList";
+import ModuleSettingsPanel from "@/components/builder/ModuleSettingsPanel";
+import PreviewPanel from "@/components/builder/PreviewPanel";
 
 export default function BriefingBuilder() {
-  const [catalog, setCatalog] = useState<PublicModuleDefinition[]>([]);
-  const [profiles, setProfiles] = useState<BriefingProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    localStorage.getItem("selectedProfileId") !== "mock-default"
-      ? localStorage.getItem("selectedProfileId")
-      : null
-  );
-  const [enabledModules, setEnabledModules] = useState<Set<string>>(new Set());
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [moduleCatalog, setModuleCatalog] = useState<any[]>([]);
+  const [enabledModuleIds, setEnabledModuleIds] = useState<string[]>([]);
   const [moduleSettings, setModuleSettings] = useState<Record<string, any>>({});
-  const [expandedModule, setExpandedModule] = useState<string | null>(null);
-  const [connectorStatus, setConnectorStatus] = useState<ConnectorStatusSummary>([]);
-  const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
-  const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
-  const [keywordInput, setKeywordInput] = useState<Record<string, string>>({});
-  const [hasSession, setHasSession] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [previewPlans, setPreviewPlans] = useState<any[] | null>(null);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [watchRules, setWatchRules] = useState<any[]>([]);
-  const [editingWatchlistModule, setEditingWatchlistModule] = useState<string | null>(null);
+  const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [previewResult, setPreviewResult] = useState<any>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [connectorStatus, setConnectorStatus] = useState<Record<string, any>>({});
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setHasSession(!!session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setHasSession(!!s));
-    return () => subscription.unsubscribe();
+    loadInitialData();
   }, []);
 
-  // ── Load Catalog ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    setIsLoadingCatalog(true);
-    getModuleCatalog()
-      .then(setCatalog)
-      .catch(err => {
-        console.error("Failed to load catalog:", err);
-        setStatusMsg("Failed to load module catalog.");
-      })
-      .finally(() => setIsLoadingCatalog(false));
-  }, []);
-
-  // ── Load profiles ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (hasSession || apiKey) {
-      if (apiKey) setInternalApiKey(apiKey);
-      getProfiles().then(setProfiles).catch(console.error);
-    }
-  }, [hasSession, apiKey]);
-
-  // ── Load connector status ─────────────────────────────────────────────────
-  const loadConnectorStatus = useCallback(async () => {
-    setIsLoadingConnectors(true);
+  async function loadInitialData() {
+    setLoading(true);
     try {
-      const res = await assembleUserData();
-      const meta = (res as any).meta;
-      if (meta?.connector_status_summary) setConnectorStatus(meta.connector_status_summary);
-    } catch {
-      // silently ignore if not authed
-    } finally {
-      setIsLoadingConnectors(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (hasSession || apiKey) loadConnectorStatus();
-  }, [hasSession, apiKey, loadConnectorStatus]);
-
-  // ── Load selected profile ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!selectedProfileId) {
-        // Reset to defaults if no profile selected
-        setEnabledModules(new Set());
-        setModuleSettings({});
-        return;
-    }
-    const profile = profiles.find(p => p.id === selectedProfileId);
-    if (profile) {
-      setEnabledModules(new Set(profile.enabled_modules));
-      setModuleSettings(profile.module_settings || {});
+      const [profs, catalog] = await Promise.all([getProfiles(), getModuleCatalog()]);
+      setProfiles(profs);
+      setModuleCatalog(catalog);
       
-      // Load rules
-      (supabase.from("watch_rules" as any)
-        .select("*")
-        .eq("profile_id", selectedProfileId) as any)
-        .then(({ data }: any) => setWatchRules(data || []));
-    }
-  }, [selectedProfileId, profiles]);
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  const toggleModule = (id: string) => {
-    setEnabledModules(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
+      const lastId = localStorage.getItem("selectedProfileId");
+      if (lastId && profs.find(p => p.id === lastId)) {
+        handleProfileSelect(lastId, profs);
+      } else if (profs.length > 0) {
+        handleProfileSelect(profs[0].id, profs);
       }
-      return next;
-    });
+    } catch (err: any) {
+      toast.error("Failed to load builder data");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleProfileSelect = (id: string, profList = profiles) => {
+    const p = profList.find(x => x.id === id);
+    if (!p) return;
+    setSelectedProfileId(id);
+    setProfileName(p.name);
+    setEnabledModuleIds(p.enabled_modules || []);
+    setModuleSettings(p.module_settings || {});
+    localStorage.setItem("selectedProfileId", id);
+    if (p.enabled_modules?.length > 0 && !selectedModuleId) {
+       setSelectedModuleId(p.enabled_modules[0]);
+    }
   };
 
-  const updateSetting = (modId: string, key: string, value: any) => {
-    setModuleSettings(prev => ({ ...prev, [modId]: { ...prev[modId], [key]: value } }));
+  const handleToggleModule = (id: string) => {
+    setEnabledModuleIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+    if (!selectedModuleId) setSelectedModuleId(id);
   };
 
-  const handleMultiselect = (modId: string, key: string, val: string) => {
-    const current = (moduleSettings[modId]?.[key] || []) as string[];
-    const next = current.includes(val) ? current.filter(v => v !== val) : [...current, val];
-    updateSetting(modId, key, next);
+  const updateModuleSetting = (key: string, value: any) => {
+    if (!selectedModuleId) return;
+    setModuleSettings(prev => ({
+      ...prev,
+      [selectedModuleId]: {
+        ...(prev[selectedModuleId] || {}),
+        [key]: value
+      }
+    }));
   };
 
-  const connectorStatusFor = (provider: string) =>
-    connectorStatus.find(c => c.provider === provider)?.status ?? null;
-
-  // ── Save profile ──────────────────────────────────────────────────────────
   const handleSave = async () => {
-    setIsSaving(true);
-    setStatusMsg(null);
+    setLoading(true);
     try {
-      const name = selectedProfileId
-        ? (profiles.find(p => p.id === selectedProfileId)?.name ?? "My Profile")
-        : window.prompt("Profile name:") || "My Profile";
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
 
-      const saved = await upsertProfile({
+      const profileData = {
         id: selectedProfileId || undefined,
-        name,
-        enabled_modules: [...enabledModules],
+        user_id: user.id,
+        name: profileName || "My Briefing",
+        enabled_modules: enabledModuleIds,
         module_settings: moduleSettings,
-      });
+      };
 
-      setProfiles(prev => {
-        const idx = prev.findIndex(p => p.id === saved.id);
-        return idx >= 0 ? prev.map((p, i) => i === idx ? saved : p) : [saved, ...prev];
-      });
-      setSelectedProfileId(saved.id);
-      localStorage.setItem("selectedProfileId", saved.id);
-      setStatusMsg("✓ Profile saved");
-    } catch (e: any) {
-      setStatusMsg("Error saving: " + e.message);
+      const saved = await upsertProfile(profileData);
+      toast.success("Profile saved successfully");
+      loadInitialData(); // Refresh list
+    } catch (err: any) {
+      toast.error(err.message);
     } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // ── Generate briefing ─────────────────────────────────────────────────────
-  const handleGenerate = async () => {
-    if (!selectedProfileId) {
-      setStatusMsg("Save a profile first to generate a briefing.");
-      return;
-    }
-    setIsGenerating(true);
-    setStatusMsg(null);
-    try {
-      const res = await generateScript({}, null, selectedProfileId);
-      await startRender(res.script_id);
-      setStatusMsg("✓ Briefing generated! Check the main page.");
-    } catch (e: any) {
-      setStatusMsg("Error: " + e.message);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  // ── Sync ──────────────────────────────────────────────────────────────────
-  const handleSync = async (force = false) => {
-    if (!hasSession && !apiKey) {
-      setStatusMsg("Authentication required to sync sources.");
-      return;
-    }
-    
-    setIsSyncing(true);
-    setStatusMsg(null);
-    try {
-      if (selectedProfileId) {
-        const { syncRequiredConnectors } = await import("@/lib/api");
-        const res = await syncRequiredConnectors(selectedProfileId, force ? "force" : "best_effort");
-        const summary = res.results.map(r => `${PROVIDER_LABEL[r.provider] || r.provider}: ${r.outcome}${r.items_synced ? ` (+${r.items_synced})` : ""}`).join(", ");
-        setStatusMsg(`✓ Sync complete: ${summary}`);
-      } else {
-        // Fallback for mock mode
-        const { syncNews, syncGithub } = await import("@/lib/api");
-        const tasks = [];
-        if (enabledModules.has("ai_news_delta")) tasks.push(syncNews());
-        if (enabledModules.has("github_prs") || enabledModules.has("github_mentions")) tasks.push(syncGithub());
-        await Promise.allSettled(tasks);
-        setStatusMsg("✓ Sources synced (Mock Mode)");
-      }
-      await loadConnectorStatus();
-    } catch (e: any) {
-      setStatusMsg("Sync error: " + e.message);
-    } finally {
-      setIsSyncing(false);
+      setLoading(false);
     }
   };
 
   const handlePreview = async () => {
-    if (!selectedProfileId) {
-      setStatusMsg("Save profile first to preview.");
-      return;
-    }
-    setIsPreviewing(true);
-    setStatusMsg(null);
+    if (!selectedProfileId) return;
+    setIsPreviewLoading(true);
     try {
-      const { previewPlan } = await import("@/lib/api");
-      const res = await previewPlan(selectedProfileId);
-      setPreviewPlans(res.plan_summary.ordered);
-      // Optional: Store the whole response if needed, but for now just the ordered list
-      // In a real app we might want to show the by_module breakdown too.
-    } catch (e: any) {
-      setStatusMsg("Preview error: " + e.message);
+      const { data, error } = await supabase.functions.invoke("preview-plan", {
+        body: { profile_id: selectedProfileId }
+      });
+      if (error) throw error;
+      setPreviewResult(data);
+      if (data.connector_status) setConnectorStatus(data.connector_status);
+    } catch (err: any) {
+      toast.error("Preview failed: " + err.message);
     } finally {
-      setIsPreviewing(false);
+      setIsPreviewLoading(false);
     }
   };
 
-  return (
-    <div className="flex flex-col h-full overflow-hidden bg-background text-foreground">
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar — Profile selector */}
-        <aside className="w-64 shrink-0 border-r border-border bg-card/50 p-4 flex flex-col gap-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Profile</p>
-          <select
-            className="w-full h-9 px-3 text-sm rounded-md bg-secondary border border-border text-foreground font-mono focus:ring-1 focus:ring-primary outline-none"
-            value={selectedProfileId || "none"}
-            onChange={e => {
-              const v = e.target.value;
-              setSelectedProfileId(v === "none" ? null : v);
-              localStorage.setItem("selectedProfileId", v);
-            }}
-          >
-            <option value="none">— New Profile —</option>
-            {profiles.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-
-          <Button variant="outline" size="sm" onClick={handleSave} disabled={isSaving} className="w-full">
-            {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            {selectedProfileId ? "Save Profile" : "Create Profile"}
-          </Button>
-
-          <div className="border-t border-border pt-3 mt-1 overflow-y-auto">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">Selected Modules</p>
-            <div className="flex flex-col gap-1">
-              {[...enabledModules].map(id => {
-                const mod = catalog.find(m => m.id === id);
-                return (
-                  <span key={id} className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono truncate">
-                    {mod?.label ?? id}
-                  </span>
-                );
-              })}
-              {enabledModules.size === 0 && (
-                <span className="text-xs text-muted-foreground">No modules selected</span>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        {/* Main content */}
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold">Select Modules</h2>
-              <Button variant="ghost" size="sm" onClick={loadConnectorStatus} disabled={isLoadingConnectors}>
-                <RefreshCw className={`w-3.5 h-3.5 mr-1 ${isLoadingConnectors ? "animate-spin" : ""}`} />
-                Refresh Status
-              </Button>
-            </div>
-
-            {isLoadingCatalog ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-                    <Loader2 className="w-8 h-8 animate-spin" />
-                    <p>Loading module catalog...</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {catalog.map(mod => {
-                    const modId = mod.id;
-                    const isEnabled = enabledModules.has(modId);
-                    const isExpanded = expandedModule === modId;
-                    const settings = moduleSettings[modId] || {};
-                    const isComingSoon = mod.availability === "coming_soon";
-
-                    return (
-                    <div
-                        key={modId}
-                        className={`rounded-xl border transition-all duration-200 ${isEnabled ? "border-primary/40 bg-primary/5" : "border-border bg-card"} ${isComingSoon ? "opacity-60" : ""}`}
-                    >
-                        <div className="p-4 flex items-start gap-3">
-                        <Switch
-                            id={`module-${modId}`}
-                            disabled={isComingSoon}
-                            checked={isEnabled}
-                            onCheckedChange={() => toggleModule(modId)}
-                            className="mt-0.5 shrink-0"
-                        />
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                                <label htmlFor={`module-${modId}`} className={`font-semibold text-sm ${isComingSoon ? "cursor-not-allowed" : "cursor-pointer"}`}>
-                                    {mod.label}
-                                </label>
-                                {mod.availability !== "ready" && (
-                                    <Badge variant="outline" className={`text-[9px] px-1.5 py-0 uppercase ${mod.availability === "beta" ? "text-blue-400 border-blue-500/30" : "text-muted-foreground"}`}>
-                                        {mod.availability}
-                                    </Badge>
-                                )}
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{mod.description}</p>
-
-                            {mod.requiredConnectors.length > 0 && !isComingSoon && (
-                            <div className="flex flex-wrap gap-1.5 mt-2">
-                                {mod.requiredConnectors.map(c => {
-                                const st = connectorStatusFor(c.provider);
-                                return (
-                                    <ConnectorPill
-                                    key={c.provider}
-                                    provider={c.provider}
-                                    label={PROVIDER_LABEL[c.provider] ?? c.provider}
-                                    status={st}
-                                    />
-                                );
-                                })}
-                            </div>
-                            )}
-                        </div>
-
-                        {isEnabled && mod.settingsUi.length > 0 && (
-                          <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setEditingWatchlistModule(modId)}
-                                className="shrink-0 text-muted-foreground hover:text-primary transition-colors p-1"
-                                title="Watchlist rules"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setExpandedModule(isExpanded ? null : modId)}
-                                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-1"
-                                title="Module settings"
-                            >
-                              <Settings2 className="w-4 h-4" />
-                              {isExpanded ? <ChevronUp className="w-3 h-3 mt-0.5" /> : <ChevronDown className="w-3 h-3 mt-0.5" />}
-                            </button>
-                          </div>
-                        )}
-                        </div>
-
-                        {isEnabled && isExpanded && (
-                        <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-4">
-                            {mod.settingsUi.map(ui => (
-                                <div key={ui.key} className="space-y-2">
-                                    <label className="text-xs font-medium text-muted-foreground">{ui.label}</label>
-                                    
-                                    {ui.type === "number" && (
-                                        <div className="flex items-center gap-3">
-                                            <Input
-                                                type="number"
-                                                value={settings[ui.key] ?? mod.defaults.settings[ui.key] ?? 0}
-                                                onChange={e => updateSetting(modId, ui.key, parseInt(e.target.value))}
-                                                className="w-24 h-8 text-xs"
-                                            />
-                                        </div>
-                                    )}
-
-                                    {ui.type === "text" && (
-                                        <Input
-                                            value={settings[ui.key] ?? mod.defaults.settings[ui.key] ?? ""}
-                                            onChange={e => updateSetting(modId, ui.key, e.target.value)}
-                                            className="h-8 text-xs"
-                                        />
-                                    )}
-
-                                    {ui.type === "multiselect" && (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {ui.options?.map(opt => {
-                                                const isActive = (settings[ui.key] || mod.defaults.settings[ui.key] || []).includes(opt);
-                                                return (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => handleMultiselect(modId, ui.key, opt)}
-                                                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${isActive ? "bg-primary/20 border-primary/40 text-primary" : "bg-muted border-border text-muted-foreground hover:border-muted-foreground"}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                        )}
-                    </div>
-                    );
-                })}
-                </div>
-            )}
-
-            {connectorStatus.some(c => c.status === "missing" || c.status === "error") && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>Some required connectors are missing or have errors.</span>
-                <Link to="/connectors">
-                  <Button variant="outline" size="sm" className="h-7 text-xs border-amber-500/40">
-                    Go to Connectors
-                  </Button>
-                </Link>
-              </div>
-            )}
-
-            {statusMsg && (
-              <div className={`text-sm px-4 py-2 rounded-lg ${statusMsg.startsWith("✓") ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-destructive/10 text-destructive border border-destructive/20"}`}>
-                {statusMsg}
-              </div>
-            )}
-          </div>
-
-          {/* Preview Overlay */}
-          {previewPlans && (
-            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-              <div className="bg-card border border-border rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
-                <div className="p-4 border-b border-border flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-primary" />
-                    <h3 className="font-bold">Briefing Plan Preview</h3>
-                    <Badge variant="secondary" className="ml-2">{previewPlans.length} Segments</Badge>
-                  </div>
-                  <button onClick={() => setPreviewPlans(null)} className="text-muted-foreground hover:text-foreground">
-                    <XCircle className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {previewPlans.map((p, idx) => (
-                    <div key={idx} className="flex gap-4 p-3 rounded-lg bg-secondary/30 border border-border/50">
-                      <div className="w-8 h-8 rounded bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold text-xs">
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm">{p.title || "Untitled Segment"}</span>
-                          <Badge variant="outline" className="text-[10px] py-0">{p.segment_kind}</Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 truncate">Grounding: {p.grounding_source_ids.slice(0, 2).join(", ")}</p>
-                        {p.action?.is_active && (
-                          <div className="mt-2 text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 inline-block border border-blue-500/20">
-                            Action: {p.action.action_button_text}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {previewPlans.length === 0 && (
-                    <div className="text-center py-12 space-y-4">
-                      <div className="text-muted-foreground italic">
-                        No segments will be generated with current data.
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => { setPreviewPlans(null); handleSync(); }}>
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        Sync Sources Now
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                <div className="p-4 border-t border-border flex justify-end">
-                  <Button onClick={() => setPreviewPlans(null)}>Close Preview</Button>
-                </div>
-              </div>
-            </div>
-          )}
-          {/* Watchlist Modal */}
-          {editingWatchlistModule && (
-            <WatchlistModal
-              moduleId={editingWatchlistModule}
-              rules={watchRules.find(r => r.module_id === editingWatchlistModule)?.rule || {}}
-              onClose={() => setEditingWatchlistModule(null)}
-              onSave={async (newRule) => {
-                const existing = watchRules.find(r => r.module_id === editingWatchlistModule);
-                const payload = {
-                  user_id: (await supabase.auth.getUser()).data.user?.id,
-                  profile_id: selectedProfileId!,
-                  module_id: editingWatchlistModule,
-                  rule: newRule
-                };
-                
-                const { data: saved } = await (supabase
-                  .from("watch_rules" as any)
-                  .upsert((existing ? { ...payload, id: existing.id } : payload) as any)
-                  .select()
-                  .single() as any);
-                
-                if (saved) {
-                  setWatchRules(prev => {
-                    const idx = prev.findIndex(r => r.module_id === editingWatchlistModule);
-                    return idx >= 0 ? prev.map((r, i) => i === idx ? saved : r) : [saved, ...prev];
-                  });
-                }
-                setEditingWatchlistModule(null);
-              }}
-            />
-          )}
-        </main>
-      </div>
-
-      {/* Bottom action bar */}
-      <footer className="border-t border-border bg-card px-6 py-3 flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-1">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => handleSync(false)} 
-            disabled={isSyncing || (selectedProfileId === null && enabledModules.size === 0)}
-            className="rounded-r-none border-r-0"
-          >
-            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-            Sync Sources
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleSync(true)}
-            disabled={isSyncing || !selectedProfileId}
-            className="rounded-l-none px-2"
-            title="Force sync (bypass cooldown)"
-          >
-            <Zap className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-        <div className="flex-1" />
-        <span className="text-xs text-muted-foreground">{enabledModules.size} module{enabledModules.size !== 1 ? "s" : ""} selected</span>
-        <Button variant="outline" size="sm" onClick={handleSave} disabled={isSaving}>
-          {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          Save Profile
-        </Button>
-        <Button variant="outline" size="sm" onClick={handlePreview} disabled={isPreviewing || enabledModules.size === 0}>
-           {isPreviewing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Settings2 className="w-4 h-4 mr-2" />}
-           Preview Plan
-        </Button>
-        <Button
-          variant="default"
-          size="sm"
-          onClick={handleGenerate}
-          disabled={isGenerating || enabledModules.size === 0}
-          className="bg-primary hover:bg-primary/90"
-        >
-          {isGenerating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
-          Generate Briefing
-        </Button>
-      </footer>
-    </div>
-  );
-}
-
-function ConnectorPill({
-  provider, label, status
-}: { provider: string; label: string; status: "active" | "missing" | "error" | null }) {
-  const color =
-    status === "active" ? "bg-green-500/15 text-green-400 border-green-500/30" :
-    status === "error"  ? "bg-red-500/15 text-red-400 border-red-500/30" :
-    status === "missing"? "bg-amber-500/15 text-amber-400 border-amber-500/30" :
-                          "bg-secondary text-muted-foreground border-border";
-
-  const Icon =
-    status === "active"  ? CheckCircle2 :
-    status === "error"   ? XCircle :
-    status === "missing" ? AlertCircle : null;
+  const selectedModule = moduleCatalog.find(m => m.id === selectedModuleId);
 
   return (
-    <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${color}`}>
-      {Icon && <Icon className="w-2.5 h-2.5" />}
-      {label}
-    </span>
-  );
-}
-
-function WatchlistModal({
-  moduleId, rules, onClose, onSave
-}: { moduleId: string; rules: any; onClose: () => void; onSave: (rule: any) => void }) {
-  const [localRule, setLocalRule] = useState(rules);
-
-  const update = (key: string, val: any) => setLocalRule((prev: any) => ({ ...prev, [key]: val }));
-
-  return (
-    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-      <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-border flex items-center justify-between bg-primary/5">
-          <div className="flex items-center gap-2 text-primary">
-            <Eye className="w-5 h-5" />
-            <h3 className="font-bold uppercase tracking-tight text-sm">Watchlist: {moduleId}</h3>
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><XCircle className="w-5 h-5" /></button>
-        </div>
+    <div className="flex flex-col h-full bg-background overflow-hidden animate-in fade-in duration-1000">
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
         
-        <div className="p-6 space-y-6">
-          {moduleId === "ai_news_delta" && (
-            <>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">Include Keywords (Priority)</label>
-                <Input 
-                  placeholder="Comma separated..." 
-                  value={localRule.include_keywords?.join(", ") || ""}
-                  onChange={e => update("include_keywords", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-                />
+        {/* Left column: Profiles & Modules */}
+        <div className="md:col-span-3 flex flex-col border-r border-border bg-card/10 overflow-hidden">
+          <div className="p-4 space-y-4 border-b border-border">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest pl-1">
+                Selected Profile
+              </label>
+              <div className="flex gap-2">
+                <select 
+                  className="flex-1 h-9 bg-secondary border border-border rounded-md px-3 text-sm outline-none focus:ring-1 focus:ring-primary/20"
+                  value={selectedProfileId || ""}
+                  onChange={(e) => handleProfileSelect(e.target.value)}
+                >
+                  {profiles.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => {
+                  setSelectedProfileId(null);
+                  setProfileName("New Profile");
+                  setEnabledModuleIds([]);
+                  setModuleSettings({});
+                }}>
+                  <Plus className="w-4 h-4" />
+                </Button>
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">Exclude Keywords</label>
-                <Input 
-                  placeholder="Spam, sports..." 
-                  value={localRule.exclude_keywords?.join(", ") || ""}
-                  onChange={e => update("exclude_keywords", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-                />
-              </div>
-            </>
-          )}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Input
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                placeholder="Profile Name"
+                className="h-8 text-xs bg-transparent border-none focus-visible:ring-0 p-1 font-semibold"
+              />
+              <Badge variant="secondary" className="text-[9px] uppercase">Active</Badge>
+            </div>
+          </div>
 
-          {moduleId === "github_prs" && (
-            <>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">Target Repos</label>
-                <Input 
-                  placeholder="org/repo..." 
-                  value={localRule.repos?.join(", ") || ""}
-                  onChange={e => update("repos", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-                />
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
-                <span className="text-xs font-medium">Require 'Review Requested'</span>
-                <Switch 
-                  checked={localRule.require_review_requested} 
-                  onCheckedChange={v => update("require_review_requested", v)} 
-                />
-              </div>
-            </>
-          )}
-
-          {moduleId === "inbox_triage" && (
-            <>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">VIP Senders</label>
-                <Input 
-                  placeholder="boss@corp.com..." 
-                  value={localRule.include_senders?.join(", ") || ""}
-                  onChange={e => update("include_senders", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">Subject keywords</label>
-                <Input 
-                  placeholder="Urgent, production..." 
-                  value={localRule.include_subject_keywords?.join(", ") || ""}
-                  onChange={e => update("include_subject_keywords", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-                />
-              </div>
-            </>
-          )}
-
-          <p className="text-[10px] text-muted-foreground italic">
-            Watchlist rules are applied deterministically to your live data. No LLM bias or hallucination included.
-          </p>
+          <ModuleList 
+            modules={moduleCatalog}
+            enabledModuleIds={enabledModuleIds}
+            selectedModuleId={selectedModuleId}
+            onToggle={handleToggleModule}
+            onSelect={setSelectedModuleId}
+            connectorStatus={connectorStatus}
+          />
         </div>
 
-        <div className="p-4 bg-secondary/20 border-t border-border flex justify-end gap-3">
-          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={() => onSave(localRule)}>Apply Rules</Button>
+        {/* Center column: Settings */}
+        <div className="md:col-span-6 flex flex-col overflow-hidden relative">
+          {selectedModule ? (
+             <ModuleSettingsPanel 
+                module={selectedModule}
+                settings={moduleSettings[selectedModuleId!] || {}}
+                onUpdate={updateModuleSetting}
+                onSave={handleSave}
+                isSaving={loading}
+             />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-6 grayscale opacity-40">
+              <div className="w-20 h-20 rounded-3xl bg-muted flex items-center justify-center">
+                <Settings className="w-10 h-10 text-muted-foreground" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold">No Module Selected</h3>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Pick a module from the sidebar to configure its preferences for this profile.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right column: Preview */}
+        <div className="md:col-span-3 overflow-hidden">
+          <PreviewPanel 
+            onPreview={handlePreview}
+            isLoading={isPreviewLoading}
+            result={previewResult}
+          />
         </div>
       </div>
     </div>
