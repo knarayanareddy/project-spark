@@ -359,3 +359,27 @@ Add safety rails for cost and security, expand actions without write-back risk, 
 
 ## 🔄 Background Sync
 - **Sync on Generate**: `generate-script` triggers a background `sync-news` run to ensure fresh content without blocking the user.
+
+---
+
+## Milestone 6 — Canonical Module Manifest
+
+### Rationale: Prevent Drift + Spoofing
+To scale features efficiently and securely, we are moving the "Source of Truth" for module definitions to the server edge. 
+- **Anti-Drift**: One single definition file (`moduleManifest.ts`) controls what the UI displays, what data `assemble-user-data` fetches, and what the planner iterates.
+- **Anti-Spoofing**: The server strictly validates `module_settings` and `enabled_modules`. Clients can no longer inject unknown modules or bypass setting constraints (like `caps`).
+
+### Core Components
+- **`moduleManifest.ts`**: The canonical registry of all 10 modules. Defines Zod schemas for settings and UI metadata.
+- **`profileMigration.ts`**: Handles versioning of user profiles to ensure forward/backward compatibility.
+- **`/get-module-catalog`**: A new endpoint for the UI to fetch its configuration dynamically.
+
+### Profile Versioning
+`briefing_profiles` now includes a `module_catalog_version`. Profiles are migrated on-read or on-write:
+- **Client ahead**: Reject request (ask user to update app).
+- **Server ahead**: Automatically strip invalid modules and apply defaults for new settings.
+
+### UI Consumption
+The Briefing Builder UI no longer hardcodes the module list. It fetches the manifest and renders:
+- Toggles based on available `id`s.
+- Settings forms based on `settingsUi` metadata (e.g., whether to show a numeric "caps" input or keyword list).
