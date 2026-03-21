@@ -254,3 +254,29 @@ Each entry is a grounded, hallucination-safe object emitted into `user_data`:
 
 ## Delta Window
 - `briefing_module_state.last_seen_at` is read here but only updated after successful briefing generation (in `generate-script`).
+
+---
+
+# Milestone 5C — Module-Driven Deterministic Planner
+
+## Objective
+Refactor `planner.ts` so that segment generation is driven by the profile's `enabled_modules` and capped by `module_settings` (falling back to `moduleCatalog.defaultSettings`). No filler, no invented facts, no `#` placeholders.
+
+## Segment Ordering
+1. **Weather** (if `weather` module enabled and data present)
+2. **Calendar** (if `calendar_today` enabled; one segment per event up to `caps`)
+3. **News Digest + Items** (if `ai_news_delta` enabled; digest first, then individual items)
+4. **GitHub Digest + Items** (if `github_prs` enabled; digest first, then individual PRs)
+5. **Email Digest + Items** (if `inbox_triage` enabled; digest first, then individual emails)
+6. **Focus Plan** (if `focus_plan` enabled and actionable items exist)
+7. **Wrap** (always last; grounded to real source_ids from earlier segments)
+
+## Caps
+- Default caps come from `MODULE_CATALOG[moduleId].defaultSettings.caps`.
+- Profile can override per-module via `profile.module_settings[moduleId].caps`.
+- If caps override is not a positive integer, the catalog default is used.
+
+## Grounding Integrity
+- Every `grounding_source_ids` entry **must** be a `source_id` present in `user_data`.
+- The wrap segment references only `source_ids` emitted by earlier plans.
+- No `action_payload` of `"#"` — use `is_active: false` + `action_payload: ""` when no real URL exists.
