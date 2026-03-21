@@ -12,7 +12,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key",
 };
 
-serve(async (req) => {
+serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -57,11 +57,11 @@ serve(async (req) => {
     if (fetchErr) throw fetchErr;
 
     // 4. Rank items (pure code, deterministic)
-    const scoredItems = items.map(item => {
+    const scoredItems = items.map((item: any) => {
       let score = 0;
       const searchSpace = `${item.title} ${item.summary}`.toLowerCase();
       
-      keywords.forEach(kw => {
+      keywords.forEach((kw: string) => {
         if (searchSpace.includes(kw.toLowerCase())) score += 3;
       });
 
@@ -73,13 +73,13 @@ serve(async (req) => {
     });
 
     // Sort by score then recency
-    scoredItems.sort((a, b) => b.score - a.score || new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+    scoredItems.sort((a: any, b: any) => b.score - a.score || new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
 
     // 5. Select top N
     const topNews = scoredItems
-      .filter(i => i.item_type === "news")
+      .filter((i: any) => i.item_type === "news")
       .slice(0, 5)
-      .map(i => ({
+      .map((i: any) => ({
         source_id: i.source_id,
         title: i.title,
         source_name: i.payload?.source_name || "RSS",
@@ -89,9 +89,9 @@ serve(async (req) => {
       }));
 
     const topPRs = scoredItems
-      .filter(i => i.item_type === "github_pr")
+      .filter((i: any) => i.item_type === "github_pr")
       .slice(0, 2)
-      .map(i => ({
+      .map((i: any) => ({
         source_id: i.source_id,
         repo: i.payload?.repo || "Unknown Repo",
         title: i.title,
@@ -110,7 +110,7 @@ serve(async (req) => {
       user_data: userData,
       meta: {
         since,
-        news_count_total: items.filter(i => i.item_type === "news").length,
+        news_count_total: items.filter((i: any) => i.item_type === "news").length,
         news_count_included: topNews.length
       }
     }), {
