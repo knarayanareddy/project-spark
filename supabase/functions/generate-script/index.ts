@@ -1,211 +1,137 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { config, validateConfig } from "../_shared/config.ts";
+import { authorizeRequest } from "../_shared/auth.ts";
+import { sanitizeDeep, redactSecrets, sanitizeUserData } from "../_shared/sanitize.ts";
+import { buildAllowedIds, validateGroundingIds } from "../_shared/grounding.ts";
+import { planBriefing, SegmentPlan } from "../_shared/planner.ts";
+import { realizeSegment } from "../_shared/realizer.ts";
+import { BriefingSegmentSchema, validateBriefingScript } from "../_shared/briefingSchema.ts";
+import { AssembledUserData } from "../_shared/userData.ts";
+
+validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key",
 };
-
-const ORCHESTRATOR_SYSTEM_PROMPT = `You are the Executive Briefing Orchestrator v2. You generate personalized morning briefings as structured JSON scripts for AI avatar video rendering.
-
-Your output MUST be valid JSON matching this exact schema:
-{
-  "briefing_metadata": {
-    "generated_at": "ISO8601 timestamp",
-    "persona": "string",
-    "total_estimated_segments": number
-  },
-  "timeline": [
-    {
-      "segment_id": sequential integer starting at 1,
-      "segment_type": "greeting|calendar_overview|email_highlights|project_updates|weather|hackathon_schedule|closing",
-      "dialogue": "Natural spoken text for the avatar to read",
-      "grounding_source_id": "ID(s) from user_data that ground this segment",
-      "runware_b_roll_prompt": "Image generation prompt or null",
-      "ui_action_card": {
-        "is_active": boolean,
-        "card_type": "calendar_join|link_open|email_reply|jira_open|github_review|weather_widget" (if active),
-        "title": "string",
-        "description": "string",
-        "action_label": "string",
-        "action_payload": "URL or action string"
-      }
-    }
-  ]
-}
-
-Rules:
-- segment_ids MUST be sequential starting at 1
-- total_estimated_segments MUST match timeline array length
-- Every segment MUST have a grounding_source_id
-- Dialogue should be conversational, concise, executive-appropriate
-- Never include API keys, tokens, emails, or secrets in output
-- Always start with a greeting segment and end with a closing segment`;
-
-const DEVELOPER_PROMPT_TEMPLATE = `Generate an executive morning briefing script for the following user.
-
-User Preferences:
-{user_preferences}
-
-User Data:
-{user_data}
-
-Generate the briefing as valid JSON matching the system prompt schema. Be concise and actionable.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Auth check
-  const internalKey = req.headers.get("x-internal-api-key");
-  const expectedKey = Deno.env.get("INTERNAL_API_KEY");
-  if (!expectedKey || internalKey !== expectedKey) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
+
+  const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+  const userId = auth.user_id;
 
   try {
     const { user_preferences, user_data } = await req.json();
+    if (!user_preferences || !user_data) throw new Error("Missing request data");
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const sanitizedPrefs = sanitizeDeep(user_preferences);
+    const sanitizedData = sanitizeUserData(user_data) as AssembledUserData;
+    const allowedSourceIds = buildAllowedIds(sanitizedData);
 
-    // Redact any potential secrets from user_data
-    let sanitizedData = JSON.stringify(user_data);
-    const secretPatterns = [/sk-[a-zA-Z0-9]{20,}/g, /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g];
-    for (const pattern of secretPatterns) {
-      sanitizedData = sanitizedData.replace(pattern, "[REDACTED]");
-    }
-
-    const openaiKey = Deno.env.get("OPENAI_API_KEY");
-    let scriptJson;
-
-    if (openaiKey) {
-      const prompt = DEVELOPER_PROMPT_TEMPLATE
-        .replace("{user_preferences}", JSON.stringify(user_preferences, null, 2))
-        .replace("{user_data}", sanitizedData);
-
-      const llmResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: ORCHESTRATOR_SYSTEM_PROMPT },
-            { role: "user", content: prompt },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.7,
-        }),
+    // 1. DETERMINISTIC PLANNER
+    const segmentPlans = planBriefing(sanitizedData);
+    if (segmentPlans.length === 0) {
+      return new Response(JSON.stringify({ error: "no_content", message: "No briefing content available. Please sync your connectors first." }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
+    }
 
-      if (!llmResponse.ok) {
-        throw new Error(`LLM API error: ${llmResponse.status}`);
+    // 2. LLM REALIZER (Per-segment)
+    const timeline_segments = [];
+    const persona = sanitizedPrefs.persona || "Professional Executive";
+
+    for (let i = 0; i < segmentPlans.length; i++) {
+      const plan = segmentPlans[i];
+      console.log(`Realizing segment ${i + 1}/${segmentPlans.length}: ${plan.plan_id}`);
+      
+      let segment = null;
+      let attempts = 0;
+      const maxAttempts = 2;
+
+      while (attempts < maxAttempts && !segment) {
+        try {
+          const realized = await realizeSegment(i + 1, plan, persona, config.OPENAI_API_KEY!);
+          
+          // Schema validation
+          const parsed = BriefingSegmentSchema.parse(realized);
+          
+          // Grounding check
+          const segIds = (parsed.grounding_source_id || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+          const invalidIds = segIds.filter((id: string) => !plan.grounding_source_ids.includes(id));
+          if (invalidIds.length > 0) throw new Error(`Invalid grounding IDs for this segment: ${invalidIds.join(", ")}`);
+
+          segment = {
+            ...parsed,
+            dialogue: redactSecrets(parsed.dialogue)
+          };
+        } catch (err: any) {
+          attempts++;
+          console.warn(`Segment ${i + 1} attempt ${attempts} failed: ${err.message}`);
+          if (attempts >= maxAttempts) {
+            // Internal fallback for this specific segment
+            segment = {
+              segment_id: i + 1,
+              dialogue: redactSecrets(`Moving on. ${plan.title}: ${Object.values(plan.facts).splice(0,3).join(". ")}`),
+              grounding_source_id: plan.grounding_source_ids.join(", "),
+              runware_b_roll_prompt: plan.b_roll_hint,
+              ui_action_card: plan.ui_action_suggestion
+            };
+          }
+        }
       }
-
-      const llmData = await llmResponse.json();
-      scriptJson = JSON.parse(llmData.choices[0].message.content);
-    } else {
-      // Fallback: generate a basic script from the data
-      scriptJson = generateFallbackScript(user_preferences, JSON.parse(sanitizedData));
+      timeline_segments.push(segment);
     }
 
-    // Validate
-    if (!scriptJson.timeline || !Array.isArray(scriptJson.timeline)) {
-      throw new Error("Invalid script: missing timeline array");
-    }
-    if (scriptJson.briefing_metadata?.total_estimated_segments !== scriptJson.timeline.length) {
-      scriptJson.briefing_metadata.total_estimated_segments = scriptJson.timeline.length;
-    }
-    for (let i = 0; i < scriptJson.timeline.length; i++) {
-      if (scriptJson.timeline[i].segment_id !== i + 1) {
-        scriptJson.timeline[i].segment_id = i + 1;
-      }
-      if (!scriptJson.timeline[i].grounding_source_id) {
-        scriptJson.timeline[i].grounding_source_id = "system";
-      }
+    const scriptJson = {
+      script_metadata: {
+        persona_applied: persona,
+        total_estimated_segments: timeline_segments.length
+      },
+      timeline_segments
+    };
+
+    try {
+      const validated = validateBriefingScript(scriptJson);
+      validateGroundingIds(validated.timeline_segments, allowedSourceIds);
+    } catch (validErr: any) {
+      return new Response(JSON.stringify({ error: "invalid_script", message: validErr.message }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
-    // Save to DB
-    const { data, error } = await supabase
+    // 3. Persist and Respond
+    const { data: scriptData, error: dbErr } = await supabase
       .from("briefing_scripts")
-      .insert({
-        persona: user_preferences?.persona || "default",
-        script_json: scriptJson,
-      })
-      .select("id")
-      .single();
+      .insert({ persona: persona, script_json: scriptJson })
+      .select().single();
 
-    if (error) throw error;
+    if (dbErr) throw dbErr;
 
-    return new Response(JSON.stringify({ script_id: data.id, script_json: scriptJson }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // 4. Update User State (Success!)
+    if (auth.mode !== "internal_key" && auth.user_id) {
+      await supabase
+        .from("briefing_user_state")
+        .upsert({ user_id: userId, last_briefed_at: new Date().toISOString() }, { onConflict: "user_id" });
+    }
+
+    return new Response(JSON.stringify({ script_id: scriptData.id, script_json: scriptJson }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
+
+  } catch (e: any) {
+    console.error("generate-script error:", e.message);
+    return new Response(JSON.stringify({ error: redactSecrets(e.message).slice(0, 200) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
-
-function generateFallbackScript(prefs: any, data: any) {
-  const timeline = [];
-  let segId = 1;
-
-  timeline.push({
-    segment_id: segId++,
-    segment_type: "greeting",
-    dialogue: `Good morning! Here's your briefing for ${data.date || "today"}.`,
-    grounding_source_id: "system",
-    runware_b_roll_prompt: null,
-    ui_action_card: { is_active: false },
-  });
-
-  if (data.calendar_events?.length) {
-    const events = data.calendar_events.map((e: any) => e.title).join(", ");
-    timeline.push({
-      segment_id: segId++,
-      segment_type: "calendar_overview",
-      dialogue: `You have ${data.calendar_events.length} events today: ${events}.`,
-      grounding_source_id: data.calendar_events.map((e: any) => e.id).join(","),
-      runware_b_roll_prompt: null,
-      ui_action_card: data.calendar_events[0]?.join_url
-        ? {
-            is_active: true,
-            card_type: "calendar_join",
-            title: data.calendar_events[0].title,
-            description: data.calendar_events[0].location,
-            action_label: "Join",
-            action_payload: data.calendar_events[0].join_url,
-          }
-        : { is_active: false },
-    });
-  }
-
-  timeline.push({
-    segment_id: segId++,
-    segment_type: "closing",
-    dialogue: "That's your briefing. Have a great day!",
-    grounding_source_id: "system",
-    runware_b_roll_prompt: null,
-    ui_action_card: { is_active: false },
-  });
-
-  return {
-    briefing_metadata: {
-      generated_at: new Date().toISOString(),
-      persona: prefs?.persona || "default",
-      total_estimated_segments: timeline.length,
-    },
-    timeline,
-  };
-}
