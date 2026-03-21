@@ -50,8 +50,24 @@ serve(async (req) => {
 
     if (segErr) throw segErr;
 
+    const stats = {
+      total: segments?.length || 0,
+      queued: segments?.filter((s: any) => s.status === "queued").length || 0,
+      rendering: segments?.filter((s: any) => s.status === "rendering").length || 0,
+      complete: segments?.filter((s: any) => s.status === "complete").length || 0,
+      failed: segments?.filter((s: any) => s.status === "failed").length || 0,
+    };
+
+    const percent_complete = stats.total > 0 
+      ? Math.floor((stats.complete / stats.total) * 100) 
+      : 0;
+
     return new Response(
-      JSON.stringify({ status: job.status, segments: segments || [] }),
+      JSON.stringify({ 
+        status: job.status, 
+        progress: { ...stats, percent_complete },
+        segments: segments || [] 
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e: any) {
