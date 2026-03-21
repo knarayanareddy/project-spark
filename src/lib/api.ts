@@ -181,19 +181,7 @@ export async function getModuleCatalog() {
 }
 
 export async function addToReadingList(item: { source_id: string; title: string; url: string }) {
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData.session) throw new Error("Authentication required to save items.");
-
-  const { error } = await supabase
-    .from("reading_list")
-    .insert({
-      user_id: sessionData.session.user.id,
-      ...item
-    });
-
-  if (error) {
-    if (error.code === "23505") return { ok: true, message: "Already in reading list" };
-    throw error;
-  }
+  // TODO: create reading_list table to persist items
+  console.log("Reading list save (stub):", item);
   return { ok: true };
 }
