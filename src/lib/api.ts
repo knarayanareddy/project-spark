@@ -15,11 +15,21 @@ async function callEdgeFunction<T>(
   const url = new URL(`${FUNCTIONS_BASE}/${fnName}`);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
+
+  const demoAuthMode = import.meta.env.VITE_DEMO_AUTH_MODE || "internal_key";
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "x-internal-api-key": internalApiKey,
     apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   };
+
+  if (session) {
+    headers["Authorization"] = `Bearer ${session.access_token}`;
+  } else if (demoAuthMode === "internal_key") {
+    headers["x-internal-api-key"] = internalApiKey;
+  }
 
   const res = await fetch(url.toString(), {
     method,
@@ -59,6 +69,14 @@ export interface SegmentStatus {
 
 export interface JobStatusResponse {
   status: string;
+  progress?: {
+    total: number;
+    queued: number;
+    rendering: number;
+    complete: number;
+    failed: number;
+    percent_complete: number;
+  };
   segments: SegmentStatus[];
 }
 
@@ -67,4 +85,22 @@ export async function getJobStatus(jobId: string) {
     method: "GET",
     params: { job_id: jobId },
   });
+}
+
+export async function triggerRenderWorker(jobId: string, maxSegments: number = 1) {
+  return callEdgeFunction<{ ok: boolean; status: string }>("render-worker", {
+    body: { job_id: jobId, max_segments: maxSegments },
+  });
+}
+
+export async function syncNews() {
+  return callEdgeFunction<{ ok: boolean; items_synced: number }>("sync-news", {});
+}
+
+export async function syncGithub() {
+  return callEdgeFunction<{ ok: boolean; items_synced: number }>("sync-github", {});
+}
+
+export async function assembleUserData() {
+  return callEdgeFunction<{ user_data: unknown; meta: unknown }>("assemble-user-data", {});
 }
