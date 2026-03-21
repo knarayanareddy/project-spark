@@ -8,7 +8,8 @@ import { planSegments, planBriefing } from "../_shared/planner.ts";
 import { realizeSegment, repairSegment } from "../_shared/realizer.ts";
 import { BriefingSegmentSchema, validateBriefingScript } from "../_shared/briefingSchema.ts";
 import { AssembledUserData } from "../_shared/userData.ts";
-import { MODULE_CATALOG, ModuleId } from "../_shared/moduleCatalog.ts";
+import { ModuleId } from "../_shared/moduleManifest.ts";
+import { migrateProfileIfNeeded } from "../_shared/profileMigration.ts";
 import { logAudit, checkLimitExceeded } from "../_shared/usage.ts";
 
 validateConfig();
@@ -56,18 +57,19 @@ serve(async (req: Request) => {
       // Load profile
       const { data: profile } = await supabase
         .from("briefing_profiles")
-        .select("persona, enabled_modules, module_settings")
+        .select("persona, enabled_modules, module_settings, module_catalog_version")
         .eq("id", profile_id)
         .eq("user_id", userId)
         .single();
 
       if (profile) {
-        if (profile.persona) persona = profile.persona;
-        enabledModules = (profile.enabled_modules || []) as ModuleId[];
-        moduleSettings = profile.module_settings || {};
+        const migrated = migrateProfileIfNeeded(profile as any);
+        persona = migrated.persona || "Professional Executive";
+        enabledModules = (migrated.enabled_modules || []) as ModuleId[];
+        moduleSettings = migrated.module_settings || {};
       }
 
-      // Call assemble-user-data internally (service-role fetch within Supabase)
+      // Call assemble-user-data internally
       const assembleUrl = `${config.SUPABASE_URL}/functions/v1/assemble-user-data`;
       const assembleRes = await fetch(assembleUrl, {
         method: "POST",
@@ -87,7 +89,7 @@ serve(async (req: Request) => {
       const assembled = await assembleRes.json();
       sanitizedData = sanitizeUserData(assembled.user_data) as AssembledUserData;
 
-      // Override meta from assembled response
+      // Extract resolved modules from assembly for consistency
       if (assembled.meta?.enabled_modules?.length > 0) {
         enabledModules = assembled.meta.enabled_modules;
       }
@@ -100,8 +102,9 @@ serve(async (req: Request) => {
       }
       sanitizedData = sanitizeUserData(callerUserData) as AssembledUserData;
       if (user_preferences?.persona) persona = user_preferences.persona;
-      // Legacy path: use planBriefing (all modules, default caps)
-      enabledModules = ["weather", "calendar_today", "ai_news_delta", "github_prs", "inbox_triage"] as ModuleId[];
+      
+      // Default modules for mock mode if none supplied
+      enabledModules = ["weather", "calendar_today", "ai_news_delta", "github_prs", "inbox_triage", "focus_plan"] as ModuleId[];
     }
 
     // ── PHASE 1 cont: Build allowed IDs (includes connector_status source_ids) ─

@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
+import { migrateProfileIfNeeded } from "../_shared/profileMigration.ts";
 
 validateConfig();
 
@@ -22,7 +23,7 @@ serve(async (req) => {
   
   const { data, error } = await supabase
     .from("briefing_profiles")
-    .select("id, name, persona, timezone, enabled_modules, module_settings, updated_at")
+    .select("id, name, persona, timezone, enabled_modules, module_settings, module_catalog_version, updated_at")
     .eq("user_id", auth.user_id)
     .order("updated_at", { ascending: false });
 
@@ -30,5 +31,8 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  return new Response(JSON.stringify(data), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  // Migrate each profile on read to ensure UI sees the latest valid manifest version
+  const migrated = (data || []).map(p => migrateProfileIfNeeded(p as any));
+
+  return new Response(JSON.stringify(migrated), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 });

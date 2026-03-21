@@ -2,7 +2,9 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
-import { MODULE_CATALOG, ModuleId } from "../_shared/moduleCatalog.ts";
+import { MODULE_CATALOG_VERSION } from "../_shared/moduleManifest.ts";
+import { migrateProfileIfNeeded } from "../_shared/profileMigration.ts";
+import { logAudit } from "../_shared/usage.ts";
 import { sanitizeDeep } from "../_shared/sanitize.ts";
 
 validateConfig();
@@ -19,49 +21,53 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: "Authenticated Session required for Profile configuration" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
+  const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+
   try {
     const payload = await req.json();
-    const { id, name, persona, timezone, enabled_modules, module_settings } = sanitizeDeep(payload);
+    const sanitized = sanitizeDeep(payload);
+    
+    // 1. Migrate and validate profile according to canonical manifest
+    const migrated = migrateProfileIfNeeded(sanitized);
 
-    if (!name) throw new Error("Profile name is required");
+    if (!migrated.name) throw new Error("Profile name is required");
 
-    // Strictly authorize Module strings mapping back directly to `moduleCatalog.ts` Code schema constants.
-    const validModules = [];
-    for (const mod of (enabled_modules || [])) {
-      if (MODULE_CATALOG[mod as ModuleId]) validModules.push(mod);
-    }
-
-    // Secure boundary against DDOS / Overloads modifying settings natively bypassing 20KB Max sizes.
-    const settingsStr = JSON.stringify(module_settings || {});
+    // Secure boundary against payload size abuse
+    const settingsStr = JSON.stringify(migrated.module_settings || {});
     if (new Blob([settingsStr]).size > 20480) { 
       throw new Error("Module settings exceed 20KB payload limit.");
     }
 
-    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
-    
-    const query = supabase.from("briefing_profiles");
-    let result;
-
     const dataObj = {
       user_id: auth.user_id,
-      name,
-      persona: persona || null,
-      timezone: timezone || null,
-      enabled_modules: validModules,
-      module_settings: module_settings || {},
+      name: migrated.name,
+      persona: migrated.persona || null,
+      timezone: migrated.timezone || null,
+      enabled_modules: migrated.enabled_modules,
+      module_settings: migrated.module_settings,
+      module_catalog_version: MODULE_CATALOG_VERSION,
       updated_at: new Date().toISOString()
     };
 
-    if (id) {
-      result = await query.update(dataObj).eq("id", id).eq("user_id", auth.user_id).select().single();
+    let result;
+    if (migrated.id) {
+      result = await supabase.from("briefing_profiles").update(dataObj).eq("id", migrated.id).eq("user_id", auth.user_id).select().single();
     } else {
-      result = await query.insert(dataObj).select().single();
+      result = await supabase.from("briefing_profiles").insert(dataObj).select().single();
     }
 
     if (result.error) throw result.error;
 
+    await logAudit(supabase, auth.user_id, "set_profile", { 
+      profile_id: result.data.id,
+      modules: migrated.enabled_modules.length,
+      version: MODULE_CATALOG_VERSION
+    });
+
     return new Response(JSON.stringify(result.data), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("Profile upsert error:", error);
+    const status = error.message?.includes("validation") ? 422 : 400;
+    return new Response(JSON.stringify({ error: error.message }), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

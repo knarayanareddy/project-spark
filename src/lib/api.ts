@@ -137,6 +137,28 @@ export async function deleteProfile(id: string) {
   return callEdgeFunction<{ success: boolean }>("delete-profile", { body: { id } });
 }
 
+export interface PublicModuleDefinition {
+  id: string;
+  label: string;
+  description: string;
+  availability: "ready" | "beta" | "coming_soon";
+  requiredConnectors: Array<{ provider: string; optional?: boolean }>;
+  defaults: {
+    maxSegments: number;
+    settings: Record<string, any>;
+  };
+  settingsUi: Array<{
+    key: string;
+    label: string;
+    type: "number" | "text" | "multiselect";
+    options?: string[];
+  }>;
+}
+
+export async function getModuleCatalog() {
+  return callEdgeFunction<PublicModuleDefinition[]>("get-module-catalog", { method: "GET" });
+}
+
 export async function addToReadingList(item: { source_id: string; title: string; url: string }) {
   const { data: sessionData } = await supabase.auth.getSession();
   if (!sessionData.session) throw new Error("Authentication required to save items.");

@@ -5,16 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Loader2, Zap, Settings2, Share2, CheckCircle2, AlertCircle, XCircle, ChevronDown, ChevronUp, ArrowLeft, RefreshCw } from "lucide-react";
-import { MODULE_CATALOG, ModuleId } from "@/lib/moduleCatalog";
-import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, planPreview } from "@/lib/api";
+import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, planPreview, getModuleCatalog, PublicModuleDefinition } from "@/lib/api";
 import { generateScript, startRender, setInternalApiKey } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
-
-const MODULE_ORDER: ModuleId[] = [
-  "weather", "calendar_today", "inbox_triage", "github_prs",
-  "github_mentions", "jira_tasks", "ai_news_delta",
-  "newsletters_digest", "focus_plan", "watchlist_alerts",
-];
 
 const PROVIDER_LABEL: Record<string, string> = {
   rss: "RSS", github: "GitHub", google: "Gmail", calendar: "Calendar", jira: "Jira", weather: "Weather",
@@ -22,23 +15,20 @@ const PROVIDER_LABEL: Record<string, string> = {
 
 type ConnectorStatusSummary = Array<{ provider: string; status: "active" | "missing" | "error" }>;
 
-type ModuleSettings = {
-  caps?: number;
-  filter_keywords?: string[];
-};
-
 export default function BriefingBuilder() {
+  const [catalog, setCatalog] = useState<PublicModuleDefinition[]>([]);
   const [profiles, setProfiles] = useState<BriefingProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
     localStorage.getItem("selectedProfileId") !== "mock-default"
       ? localStorage.getItem("selectedProfileId")
       : null
   );
-  const [enabledModules, setEnabledModules] = useState<Set<ModuleId>>(new Set(["ai_news_delta", "github_prs"]));
-  const [moduleSettings, setModuleSettings] = useState<Record<string, ModuleSettings>>({});
-  const [expandedModule, setExpandedModule] = useState<ModuleId | null>(null);
+  const [enabledModules, setEnabledModules] = useState<Set<string>>(new Set());
+  const [moduleSettings, setModuleSettings] = useState<Record<string, any>>({});
+  const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const [connectorStatus, setConnectorStatus] = useState<ConnectorStatusSummary>([]);
   const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -54,6 +44,18 @@ export default function BriefingBuilder() {
     supabase.auth.getSession().then(({ data: { session } }) => setHasSession(!!session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setHasSession(!!s));
     return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Load Catalog ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    setIsLoadingCatalog(true);
+    getModuleCatalog()
+      .then(setCatalog)
+      .catch(err => {
+        console.error("Failed to load catalog:", err);
+        setStatusMsg("Failed to load module catalog.");
+      })
+      .finally(() => setIsLoadingCatalog(false));
   }, []);
 
   // ── Load profiles ─────────────────────────────────────────────────────────
@@ -84,20 +86,24 @@ export default function BriefingBuilder() {
 
   // ── Load selected profile ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedProfileId) return;
+    if (!selectedProfileId) {
+        // Reset to defaults if no profile selected
+        setEnabledModules(new Set());
+        setModuleSettings({});
+        return;
+    }
     const profile = profiles.find(p => p.id === selectedProfileId);
     if (profile) {
-      setEnabledModules(new Set(profile.enabled_modules as ModuleId[]));
+      setEnabledModules(new Set(profile.enabled_modules));
       setModuleSettings(profile.module_settings || {});
     }
   }, [selectedProfileId, profiles]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const toggleModule = (id: ModuleId) => {
+  const toggleModule = (id: string) => {
     setEnabledModules(prev => {
       const next = new Set(prev);
-      const isEnabled = next.has(id);
-      if (isEnabled) {
+      if (next.has(id)) {
         next.delete(id);
       } else {
         next.add(id);
@@ -107,27 +113,13 @@ export default function BriefingBuilder() {
   };
 
   const updateSetting = (modId: string, key: string, value: any) => {
-    // Client-side validation
-    if (key === "caps") {
-      const v = parseInt(value, 10);
-      if (isNaN(v) || v < 1 || v > 10) return;
-      value = v;
-    }
     setModuleSettings(prev => ({ ...prev, [modId]: { ...prev[modId], [key]: value } }));
   };
 
-  const addKeyword = (modId: string) => {
-    const kw = (keywordInput[modId] || "").trim();
-    if (!kw || kw.length > 40) return;
-    const current = (moduleSettings[modId]?.filter_keywords || []) as string[];
-    if (current.length >= 30 || current.includes(kw)) return;
-    updateSetting(modId, "filter_keywords", [...current, kw]);
-    setKeywordInput(prev => ({ ...prev, [modId]: "" }));
-  };
-
-  const removeKeyword = (modId: string, kw: string) => {
-    const current = (moduleSettings[modId]?.filter_keywords || []) as string[];
-    updateSetting(modId, "filter_keywords", current.filter(k => k !== kw));
+  const handleMultiselect = (modId: string, key: string, val: string) => {
+    const current = (moduleSettings[modId]?.[key] || []) as string[];
+    const next = current.includes(val) ? current.filter(v => v !== val) : [...current, val];
+    updateSetting(modId, key, next);
   };
 
   const connectorStatusFor = (provider: string) =>
@@ -232,7 +224,6 @@ export default function BriefingBuilder() {
           <h1 className="font-bold text-lg tracking-tight">Briefing Builder</h1>
         </div>
         <div className="flex-1" />
-        {/* Auth input for internal key */}
         {!hasSession && (
           <input
             type="password"
@@ -273,14 +264,17 @@ export default function BriefingBuilder() {
             {selectedProfileId ? "Save Profile" : "Create Profile"}
           </Button>
 
-          <div className="border-t border-border pt-3 mt-1">
+          <div className="border-t border-border pt-3 mt-1 overflow-y-auto">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">Selected Modules</p>
             <div className="flex flex-col gap-1">
-              {[...enabledModules].map(id => (
-                <span key={id} className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono">
-                  {MODULE_CATALOG[id]?.label ?? id}
-                </span>
-              ))}
+              {[...enabledModules].map(id => {
+                const mod = catalog.find(m => m.id === id);
+                return (
+                  <span key={id} className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono truncate">
+                    {mod?.label ?? id}
+                  </span>
+                );
+              })}
               {enabledModules.size === 0 && (
                 <span className="text-xs text-muted-foreground">No modules selected</span>
               )}
@@ -299,120 +293,126 @@ export default function BriefingBuilder() {
               </Button>
             </div>
 
-            {/* Module grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {MODULE_ORDER.map(modId => {
-                const mod = MODULE_CATALOG[modId];
-                const isEnabled = enabledModules.has(modId);
-                const isExpanded = expandedModule === modId;
-                const settings = moduleSettings[modId] || {};
+            {isLoadingCatalog ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+                    <Loader2 className="w-8 h-8 animate-spin" />
+                    <p>Loading module catalog...</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {catalog.map(mod => {
+                    const modId = mod.id;
+                    const isEnabled = enabledModules.has(modId);
+                    const isExpanded = expandedModule === modId;
+                    const settings = moduleSettings[modId] || {};
+                    const isComingSoon = mod.availability === "coming_soon";
 
-                return (
-                  <div
-                    key={modId}
-                    className={`rounded-xl border transition-all duration-200 ${isEnabled ? "border-primary/40 bg-primary/5" : "border-border bg-card"}`}
-                  >
-                    {/* Module header */}
-                    <div className="p-4 flex items-start gap-3">
-                      <Switch
-                        id={`module-${modId}`}
-                        checked={isEnabled}
-                        onCheckedChange={() => toggleModule(modId)}
-                        className="mt-0.5 shrink-0"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <label htmlFor={`module-${modId}`} className="font-semibold text-sm cursor-pointer">
-                          {mod.label}
-                        </label>
-                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{mod.description}</p>
+                    return (
+                    <div
+                        key={modId}
+                        className={`rounded-xl border transition-all duration-200 ${isEnabled ? "border-primary/40 bg-primary/5" : "border-border bg-card"} ${isComingSoon ? "opacity-60" : ""}`}
+                    >
+                        <div className="p-4 flex items-start gap-3">
+                        <Switch
+                            id={`module-${modId}`}
+                            disabled={isComingSoon}
+                            checked={isEnabled}
+                            onCheckedChange={() => toggleModule(modId)}
+                            className="mt-0.5 shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                                <label htmlFor={`module-${modId}`} className={`font-semibold text-sm ${isComingSoon ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                                    {mod.label}
+                                </label>
+                                {mod.availability !== "ready" && (
+                                    <Badge variant="outline" className={`text-[9px] px-1.5 py-0 uppercase ${mod.availability === "beta" ? "text-blue-400 border-blue-500/30" : "text-muted-foreground"}`}>
+                                        {mod.availability}
+                                    </Badge>
+                                )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{mod.description}</p>
 
-                        {/* Connector requirement pills */}
-                        {mod.requiredConnectors.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {mod.requiredConnectors.map(c => {
-                              const st = connectorStatusFor(c.provider);
-                              return (
-                                <ConnectorPill
-                                  key={c.provider}
-                                  provider={c.provider}
-                                  label={PROVIDER_LABEL[c.provider] ?? c.provider}
-                                  optional={c.optional}
-                                  status={st}
-                                />
-                              );
-                            })}
-                          </div>
+                            {mod.requiredConnectors.length > 0 && !isComingSoon && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                {mod.requiredConnectors.map(c => {
+                                const st = connectorStatusFor(c.provider);
+                                return (
+                                    <ConnectorPill
+                                    key={c.provider}
+                                    provider={c.provider}
+                                    label={PROVIDER_LABEL[c.provider] ?? c.provider}
+                                    status={st}
+                                    />
+                                );
+                                })}
+                            </div>
+                            )}
+                        </div>
+
+                        {isEnabled && mod.settingsUi.length > 0 && (
+                            <button
+                                onClick={() => setExpandedModule(isExpanded ? null : modId)}
+                                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-1"
+                                title="Module settings"
+                            >
+                            <Settings2 className="w-4 h-4" />
+                            {isExpanded ? <ChevronUp className="w-3 h-3 mt-0.5" /> : <ChevronDown className="w-3 h-3 mt-0.5" />}
+                            </button>
                         )}
-                      </div>
+                        </div>
 
-                      {/* Expand settings toggle */}
-                      {isEnabled && (
-                        <button
-                          onClick={() => setExpandedModule(isExpanded ? null : modId)}
-                          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-1"
-                          title="Module settings"
-                        >
-                          <Settings2 className="w-4 h-4" />
-                          {isExpanded ? <ChevronUp className="w-3 h-3 mt-0.5" /> : <ChevronDown className="w-3 h-3 mt-0.5" />}
-                        </button>
-                      )}
+                        {isEnabled && isExpanded && (
+                        <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-4">
+                            {mod.settingsUi.map(ui => (
+                                <div key={ui.key} className="space-y-2">
+                                    <label className="text-xs font-medium text-muted-foreground">{ui.label}</label>
+                                    
+                                    {ui.type === "number" && (
+                                        <div className="flex items-center gap-3">
+                                            <Input
+                                                type="number"
+                                                value={settings[ui.key] ?? mod.defaults.settings[ui.key] ?? 0}
+                                                onChange={e => updateSetting(modId, ui.key, parseInt(e.target.value))}
+                                                className="w-24 h-8 text-xs"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {ui.type === "text" && (
+                                        <Input
+                                            value={settings[ui.key] ?? mod.defaults.settings[ui.key] ?? ""}
+                                            onChange={e => updateSetting(modId, ui.key, e.target.value)}
+                                            className="h-8 text-xs"
+                                        />
+                                    )}
+
+                                    {ui.type === "multiselect" && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {ui.options?.map(opt => {
+                                                const isActive = (settings[ui.key] || mod.defaults.settings[ui.key] || []).includes(opt);
+                                                return (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => handleMultiselect(modId, ui.key, opt)}
+                                                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${isActive ? "bg-primary/20 border-primary/40 text-primary" : "bg-muted border-border text-muted-foreground hover:border-muted-foreground"}`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        )}
                     </div>
+                    );
+                })}
+                </div>
+            )}
 
-                    {/* Settings panel */}
-                    {isEnabled && isExpanded && (
-                      <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-3">
-                        {/* Max items cap */}
-                        {"caps" in mod.defaultSettings && (
-                          <div className="flex items-center gap-3">
-                            <label className="text-xs text-muted-foreground w-24">Max items</label>
-                            <input
-                              type="number"
-                              min={1}
-                              max={10}
-                              value={(settings as any).caps ?? mod.defaultSettings.caps}
-                              onChange={e => updateSetting(modId, "caps", e.target.value)}
-                              className="w-20 h-8 px-2 text-sm rounded-md bg-muted border border-border text-foreground outline-none focus:ring-1 focus:ring-primary"
-                            />
-                            <span className="text-xs text-muted-foreground">(1–10)</span>
-                          </div>
-                        )}
-
-                        {/* Keywords — only for ai_news_delta */}
-                        {modId === "ai_news_delta" && (
-                          <div className="space-y-2">
-                            <label className="text-xs text-muted-foreground">Filter keywords</label>
-                            <div className="flex gap-2">
-                              <Input
-                                value={keywordInput[modId] || ""}
-                                onChange={e => setKeywordInput(prev => ({ ...prev, [modId]: e.target.value }))}
-                                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addKeyword(modId); } }}
-                                placeholder="Add keyword…"
-                                className="h-8 text-xs"
-                                maxLength={40}
-                              />
-                              <Button size="sm" variant="outline" className="h-8 px-3 text-xs" onClick={() => addKeyword(modId)}>
-                                Add
-                              </Button>
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {((settings as any).filter_keywords || []).map((kw: string) => (
-                                <span key={kw} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-secondary text-foreground">
-                                  {kw}
-                                  <button onClick={() => removeKeyword(modId, kw)} className="text-muted-foreground hover:text-destructive ml-0.5">×</button>
-                                </span>
-                              ))}
-                            </div>
-                            <p className="text-[10px] text-muted-foreground">Max 30 keywords, each ≤ 40 characters.</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Missing connector CTA */}
             {connectorStatus.some(c => c.status === "missing" || c.status === "error") && (
               <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -425,7 +425,6 @@ export default function BriefingBuilder() {
               </div>
             )}
 
-            {/* Status message */}
             {statusMsg && (
               <div className={`text-sm px-4 py-2 rounded-lg ${statusMsg.startsWith("✓") ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-destructive/10 text-destructive border border-destructive/20"}`}>
                 {statusMsg}
@@ -457,7 +456,7 @@ export default function BriefingBuilder() {
                           <span className="font-semibold text-sm">{p.title}</span>
                           <Badge variant="outline" className="text-[10px] py-0">{p.segment_kind}</Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">Grounding: {p.grounding_source_ids.slice(0, 2).join(", ")}</p>
+                        <p className="text-xs text-muted-foreground mt-1 truncate">Grounding: {p.grounding_source_ids.slice(0, 2).join(", ")}</p>
                         {p.ui_action_suggestion?.is_active && (
                           <div className="mt-2 text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 inline-block border border-blue-500/20">
                             Action: {p.ui_action_suggestion.action_button_text}
@@ -512,10 +511,9 @@ export default function BriefingBuilder() {
   );
 }
 
-// ── Connector status pill ─────────────────────────────────────────────────────
 function ConnectorPill({
-  provider, label, optional, status
-}: { provider: string; label: string; optional: boolean; status: "active" | "missing" | "error" | null }) {
+  provider, label, status
+}: { provider: string; label: string; status: "active" | "missing" | "error" | null }) {
   const color =
     status === "active" ? "bg-green-500/15 text-green-400 border-green-500/30" :
     status === "error"  ? "bg-red-500/15 text-red-400 border-red-500/30" :
@@ -530,7 +528,7 @@ function ConnectorPill({
   return (
     <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${color}`}>
       {Icon && <Icon className="w-2.5 h-2.5" />}
-      {label}{optional ? " (opt)" : ""}
+      {label}
     </span>
   );
 }

@@ -18,7 +18,7 @@ export interface AssembledUserData {
     start_time_iso: string;
     end_time_iso: string;
     location?: string;
-    meeting_link?: string;
+    join_url?: string;
   }>;
   emails_unread?: Array<{
     source_id: string;
@@ -57,10 +57,11 @@ export interface AssembledUserData {
   }>;
   weather?: Array<{
     source_id: string;
-    location_display: string;
+    location: string;
     summary: string;
-    temp_c: number;
-    precip_probability_pct: number;
+    current_temp_f: number;
+    forecast_high_f: number;
+    forecast_low_f: number;
   }>;
   connector_status: ConnectorStatus[];
 }
