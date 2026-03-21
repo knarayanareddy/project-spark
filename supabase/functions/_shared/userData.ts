@@ -28,6 +28,7 @@ export interface AssembledUserData {
     received_time_iso: string;
     email_id: string;
     thread_id: string;
+    priority?: boolean;
   }>;
   github_prs?: Array<{
     source_id: string;
@@ -37,6 +38,7 @@ export interface AssembledUserData {
     author_display: string;
     status: string;
     updated_time_iso: string;
+    priority?: boolean;
   }>;
   jira_tasks?: Array<{
     source_id: string;
@@ -54,6 +56,7 @@ export interface AssembledUserData {
     published_time_iso: string;
     snippet: string;
     tags?: string[];
+    priority?: boolean;
   }>;
   weather?: Array<{
     source_id: string;

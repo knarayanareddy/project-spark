@@ -3,6 +3,7 @@ import { Config } from "./config.ts";
 import { falAvatarProvider } from "./providers/falAvatar.ts";
 import { runwareProvider } from "./providers/runware.ts";
 import { veedAvatarProvider } from "./providers/veedAvatar.ts";
+import { computeAvatarAssetKey, computeBrollAssetKey } from "./assetKey.ts";
 
 export interface RenderProgress {
   total: number;
@@ -55,29 +56,93 @@ export async function processNextSegments(
 
     try {
       let bRollUrl = null;
-      // Budget check for B-roll
+      let brollKey = "";
+
+      // 1. B-Roll Cache Path
       if (config.ENABLE_RUNWARE && seg.runware_b_roll_prompt && seg.segment_id <= config.MAX_BROLL_SEGMENTS) {
-        try {
-          const res = await runwareProvider.generateImage({
-            prompt: seg.runware_b_roll_prompt,
-            aspectRatio: "16:9",
-          });
-          bRollUrl = res.url;
-        } catch (e: any) {
-          console.error(`B-roll failed for segment ${seg.segment_id}:`, e.message);
+        brollKey = await computeBrollAssetKey({
+          prompt: seg.runware_b_roll_prompt, 
+          aspectRatio: "16:9",
+          provider: "runware"
+        });
+
+        const { data: cachedBroll } = await supabase
+          .from("rendered_asset_cache")
+          .select("url")
+          .eq("user_id", job.user_id)
+          .eq("asset_key", brollKey)
+          .eq("asset_type", "b_roll_image")
+          .single();
+
+        if (cachedBroll) {
+          console.log(`B-roll cache hit for segment ${seg.segment_id}`);
+          bRollUrl = cachedBroll.url;
+          await supabase.from("rendered_asset_cache").update({ last_used_at: new Date().toISOString() })
+            .match({ user_id: job.user_id, asset_key: brollKey, asset_type: 'b_roll_image' });
+        } else {
+          try {
+            const res = await runwareProvider.generateImage({
+              prompt: seg.runware_b_roll_prompt,
+              aspectRatio: "16:9",
+            });
+            bRollUrl = res.url;
+            // Store in cache
+            await supabase.from("rendered_asset_cache").upsert({
+              user_id: job.user_id,
+              asset_key: brollKey,
+              asset_type: "b_roll_image",
+              provider: "runware",
+              url: bRollUrl
+            });
+          } catch (e: any) {
+            console.error(`B-roll failed for segment ${seg.segment_id}:`, e.message);
+          }
         }
       }
 
-      const avatarRes = await avatarProvider.generateVideo({
+      // 2. Avatar Cache Path
+      const avatarProviderName = config.AVATAR_PROVIDER;
+      const avatarKey = await computeAvatarAssetKey({
         dialogue: seg.dialogue,
         personaTitle: personaTitle,
+        provider: avatarProviderName
       });
+
+      let avatarUrl = null;
+      const { data: cachedAvatar } = await supabase
+        .from("rendered_asset_cache")
+        .select("url")
+        .eq("user_id", job.user_id)
+        .eq("asset_key", avatarKey)
+        .eq("asset_type", "avatar_video")
+        .single();
+
+      if (cachedAvatar) {
+        console.log(`Avatar cache hit for segment ${seg.segment_id}`);
+        avatarUrl = cachedAvatar.url;
+        await supabase.from("rendered_asset_cache").update({ last_used_at: new Date().toISOString() })
+          .match({ user_id: job.user_id, asset_key: avatarKey, asset_type: 'avatar_video' });
+      } else {
+        const avatarRes = await avatarProvider.generateVideo({
+          dialogue: seg.dialogue,
+          personaTitle: personaTitle,
+        });
+        avatarUrl = avatarRes.url;
+        // Store in cache
+        await supabase.from("rendered_asset_cache").upsert({
+          user_id: job.user_id,
+          asset_key: avatarKey,
+          asset_type: "avatar_video",
+          provider: avatarProviderName,
+          url: avatarUrl
+        });
+      }
 
       await supabase
         .from("rendered_segments")
         .update({
           status: "complete",
-          avatar_video_url: avatarRes.url,
+          avatar_video_url: avatarUrl,
           b_roll_image_url: bRollUrl,
         })
         .match({ job_id: jobId, segment_id: seg.segment_id });

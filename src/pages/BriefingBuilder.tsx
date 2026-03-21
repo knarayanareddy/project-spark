@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Loader2, Zap, Settings2, Share2, CheckCircle2, AlertCircle, XCircle, ChevronDown, ChevronUp, ArrowLeft, RefreshCw } from "lucide-react";
+import { Loader2, Zap, Settings2, Share2, CheckCircle2, AlertCircle, XCircle, ChevronDown, ChevronUp, ArrowLeft, RefreshCw, Eye } from "lucide-react";
 import { getProfiles, upsertProfile, BriefingProfile, assembleUserData, previewPlan, getModuleCatalog, PublicModuleDefinition } from "@/lib/api";
 import { generateScript, startRender, setInternalApiKey } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,6 +38,8 @@ export default function BriefingBuilder() {
   const [apiKey, setApiKey] = useState("");
   const [previewPlans, setPreviewPlans] = useState<any[] | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [watchRules, setWatchRules] = useState<any[]>([]);
+  const [editingWatchlistModule, setEditingWatchlistModule] = useState<string | null>(null);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -96,6 +98,12 @@ export default function BriefingBuilder() {
     if (profile) {
       setEnabledModules(new Set(profile.enabled_modules));
       setModuleSettings(profile.module_settings || {});
+      
+      // Load rules
+      (supabase.from("watch_rules" as any)
+        .select("*")
+        .eq("profile_id", selectedProfileId) as any)
+        .then(({ data }: any) => setWatchRules(data || []));
     }
   }, [selectedProfileId, profiles]);
 
@@ -367,14 +375,23 @@ export default function BriefingBuilder() {
                         </div>
 
                         {isEnabled && mod.settingsUi.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setEditingWatchlistModule(modId)}
+                                className="shrink-0 text-muted-foreground hover:text-primary transition-colors p-1"
+                                title="Watchlist rules"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
                             <button
                                 onClick={() => setExpandedModule(isExpanded ? null : modId)}
                                 className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-1"
                                 title="Module settings"
                             >
-                            <Settings2 className="w-4 h-4" />
-                            {isExpanded ? <ChevronUp className="w-3 h-3 mt-0.5" /> : <ChevronDown className="w-3 h-3 mt-0.5" />}
+                              <Settings2 className="w-4 h-4" />
+                              {isExpanded ? <ChevronUp className="w-3 h-3 mt-0.5" /> : <ChevronDown className="w-3 h-3 mt-0.5" />}
                             </button>
+                          </div>
                         )}
                         </div>
 
@@ -500,6 +517,37 @@ export default function BriefingBuilder() {
               </div>
             </div>
           )}
+          {/* Watchlist Modal */}
+          {editingWatchlistModule && (
+            <WatchlistModal
+              moduleId={editingWatchlistModule}
+              rules={watchRules.find(r => r.module_id === editingWatchlistModule)?.rule || {}}
+              onClose={() => setEditingWatchlistModule(null)}
+              onSave={async (newRule) => {
+                const existing = watchRules.find(r => r.module_id === editingWatchlistModule);
+                const payload = {
+                  user_id: (await supabase.auth.getUser()).data.user?.id,
+                  profile_id: selectedProfileId!,
+                  module_id: editingWatchlistModule,
+                  rule: newRule
+                };
+                
+                const { data: saved } = await (supabase
+                  .from("watch_rules" as any)
+                  .upsert((existing ? { ...payload, id: existing.id } : payload) as any)
+                  .select()
+                  .single() as any);
+                
+                if (saved) {
+                  setWatchRules(prev => {
+                    const idx = prev.findIndex(r => r.module_id === editingWatchlistModule);
+                    return idx >= 0 ? prev.map((r, i) => i === idx ? saved : r) : [saved, ...prev];
+                  });
+                }
+                setEditingWatchlistModule(null);
+              }}
+            />
+          )}
         </main>
       </div>
 
@@ -571,5 +619,100 @@ function ConnectorPill({
       {Icon && <Icon className="w-2.5 h-2.5" />}
       {label}
     </span>
+  );
+}
+
+function WatchlistModal({
+  moduleId, rules, onClose, onSave
+}: { moduleId: string; rules: any; onClose: () => void; onSave: (rule: any) => void }) {
+  const [localRule, setLocalRule] = useState(rules);
+
+  const update = (key: string, val: any) => setLocalRule((prev: any) => ({ ...prev, [key]: val }));
+
+  return (
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[60] flex items-center justify-center p-6">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
+        <div className="p-4 border-b border-border flex items-center justify-between bg-primary/5">
+          <div className="flex items-center gap-2 text-primary">
+            <Eye className="w-5 h-5" />
+            <h3 className="font-bold uppercase tracking-tight text-sm">Watchlist: {moduleId}</h3>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><XCircle className="w-5 h-5" /></button>
+        </div>
+        
+        <div className="p-6 space-y-6">
+          {moduleId === "ai_news_delta" && (
+            <>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Include Keywords (Priority)</label>
+                <Input 
+                  placeholder="Comma separated..." 
+                  value={localRule.include_keywords?.join(", ") || ""}
+                  onChange={e => update("include_keywords", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Exclude Keywords</label>
+                <Input 
+                  placeholder="Spam, sports..." 
+                  value={localRule.exclude_keywords?.join(", ") || ""}
+                  onChange={e => update("exclude_keywords", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+                />
+              </div>
+            </>
+          )}
+
+          {moduleId === "github_prs" && (
+            <>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Target Repos</label>
+                <Input 
+                  placeholder="org/repo..." 
+                  value={localRule.repos?.join(", ") || ""}
+                  onChange={e => update("repos", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
+                <span className="text-xs font-medium">Require 'Review Requested'</span>
+                <Switch 
+                  checked={localRule.require_review_requested} 
+                  onCheckedChange={v => update("require_review_requested", v)} 
+                />
+              </div>
+            </>
+          )}
+
+          {moduleId === "inbox_triage" && (
+            <>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">VIP Senders</label>
+                <Input 
+                  placeholder="boss@corp.com..." 
+                  value={localRule.include_senders?.join(", ") || ""}
+                  onChange={e => update("include_senders", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Subject keywords</label>
+                <Input 
+                  placeholder="Urgent, production..." 
+                  value={localRule.include_subject_keywords?.join(", ") || ""}
+                  onChange={e => update("include_subject_keywords", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
+                />
+              </div>
+            </>
+          )}
+
+          <p className="text-[10px] text-muted-foreground italic">
+            Watchlist rules are applied deterministically to your live data. No LLM bias or hallucination included.
+          </p>
+        </div>
+
+        <div className="p-4 bg-secondary/20 border-t border-border flex justify-end gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={() => onSave(localRule)}>Apply Rules</Button>
+        </div>
+      </div>
+    </div>
   );
 }

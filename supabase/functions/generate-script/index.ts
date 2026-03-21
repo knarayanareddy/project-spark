@@ -11,6 +11,7 @@ import { AssembledUserData } from "../_shared/userData.ts";
 import { ModuleId } from "../_shared/moduleManifest.ts";
 import { migrateProfileIfNeeded } from "../_shared/profileMigration.ts";
 import { logAudit, checkLimitExceeded } from "../_shared/usage.ts";
+import { computePlanHash } from "../_shared/planHash.ts";
 
 validateConfig();
 
@@ -52,6 +53,59 @@ serve(async (req: Request) => {
     let enabledModules: ModuleId[] = [];
     let moduleSettings: Record<string, any> = {};
 
+    // ── UTILITIES ───────────────────────────────────────────────────────────
+    const checkStaleAndSyncRss = async () => {
+      if (!profile_id) return;
+      try {
+        const { data: latestState } = await supabase
+          .from("rss_feed_state")
+          .select("last_success_at")
+          .eq("user_id", userId)
+          .order("last_success_at", { ascending: false })
+          .limit(1);
+
+        const lastSuccess = latestState?.[0]?.last_success_at;
+        const isStale = !lastSuccess || (Date.now() - new Date(lastSuccess).getTime() > 2 * 60 * 60 * 1000);
+
+        if (isStale) {
+          const syncUrl = `${config.SUPABASE_URL}/functions/v1/sync-news`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 800);
+
+          await fetch(syncUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
+              "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+            },
+            signal: controller.signal
+          }).catch(() => {});
+          clearTimeout(timeoutId);
+        }
+      } catch (err) {
+        console.warn("Foreground stale RSS sync failed:", err);
+      }
+    };
+
+    const triggerSync = async () => {
+      if (!profile_id) return;
+      try {
+        const syncUrl = `${config.SUPABASE_URL}/functions/v1/sync-required-connectors`;
+        await fetch(syncUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
+            "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+          },
+          body: JSON.stringify({ profile_id, mode: "best_effort" })
+        });
+      } catch (err) {
+        console.warn("Background sync-required-connectors failed:", err);
+      }
+    };
+
     // ── PHASE 1: Profile-driven path ─────────────────────────────────────────
     if (profile_id) {
       // Load profile
@@ -69,7 +123,10 @@ serve(async (req: Request) => {
         moduleSettings = migrated.module_settings || {};
       }
 
-      // Call assemble-user-data internally
+      // 1b: Optional Stale RSS Refresh (800ms limit)
+      await checkStaleAndSyncRss();
+
+      // 1c: Call assemble-user-data internally
       const assembleUrl = `${config.SUPABASE_URL}/functions/v1/assemble-user-data`;
       const assembleRes = await fetch(assembleUrl, {
         method: "POST",
@@ -102,18 +159,14 @@ serve(async (req: Request) => {
       }
       sanitizedData = sanitizeUserData(callerUserData) as AssembledUserData;
       if (user_preferences?.persona) persona = user_preferences.persona;
-      
-      // Default modules for mock mode if none supplied
       enabledModules = ["weather", "calendar_today", "ai_news_delta", "github_prs", "inbox_triage", "focus_plan"] as ModuleId[];
     }
 
-    // ── PHASE 1 cont: Build allowed IDs (includes connector_status source_ids) ─
+    // ── PHASE 1 cont: Build allowed IDs ──────────────────────────────────────
     const allowedSourceIds = buildAllowedIds(sanitizedData);
 
     // ── PHASE 2: Deterministic planner ────────────────────────────────────────
-    const segmentPlans = profile_id
-      ? planSegments({ enabledModules, moduleSettings, userData: sanitizedData })
-      : planBriefing(sanitizedData);         // legacy fallback
+    const segmentPlans = planSegments({ enabledModules, moduleSettings, userData: sanitizedData });
 
     if (segmentPlans.length === 0) {
       return new Response(JSON.stringify({
@@ -122,55 +175,87 @@ serve(async (req: Request) => {
       }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ── PHASE 3: LLM Realizer — per segment with repair + fallback ────────────
-    const timeline_segments = [];
+    // ── PHASE 2b: Plan Hash Check ──────────────────────────────────────────
+    const planHash = await computePlanHash(segmentPlans);
+    const TTL_HOURS = 12;
 
-    for (let i = 0; i < segmentPlans.length; i++) {
-      const plan = segmentPlans[i];
-      let segment = null;
-      let lastRawOutput = "";
-      let lastError = "";
+    const { data: cachedScript } = await supabase
+      .from("briefing_scripts")
+      .select("id, script_json")
+      .eq("user_id", userId)
+      .eq("plan_hash", planHash)
+      .gt("created_at", new Date(Date.now() - TTL_HOURS * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
 
-      // Attempt 1: initial realize
-      try {
-        const realized = await realizeSegment(i + 1, plan, persona, config.OPENAI_API_KEY!);
-        lastRawOutput = JSON.stringify(realized);
-        const parsed = BriefingSegmentSchema.parse(realized);
-        validateSegmentGrounding(parsed, plan.grounding_source_ids);
-        segment = { ...parsed, dialogue: redactSecrets(parsed.dialogue) };
-      } catch (err: any) {
-        lastError = err.message;
-        console.warn(`Segment ${i + 1} attempt 1 failed: ${err.message}`);
+    if (cachedScript) {
+      console.log(`Cache Hit for plan ${planHash}. Reusing script ${cachedScript.id}`);
+      
+      // Still trigger background sync
+      if ((globalThis as any).EdgeRuntime?.waitUntil) {
+        (globalThis as any).EdgeRuntime.waitUntil(triggerSync());
+      } else {
+        triggerSync();
       }
 
-      // Attempt 2: one-shot repair
-      if (!segment) {
-        try {
-          const repaired = await repairSegment(i + 1, plan, lastRawOutput, lastError, persona, config.OPENAI_API_KEY!);
-          const parsed = BriefingSegmentSchema.parse(repaired);
-          validateSegmentGrounding(parsed, plan.grounding_source_ids);
-          segment = { ...parsed, dialogue: redactSecrets(parsed.dialogue) };
-        } catch (repairErr: any) {
-          console.warn(`Segment ${i + 1} repair failed: ${repairErr.message}. Using deterministic fallback.`);
-        }
-      }
-
-      // Deterministic fallback — always safe, always grounded
-      if (!segment) {
-        const factValues = Object.values(plan.facts).filter(v => typeof v === "string" || typeof v === "number");
-        segment = {
-          segment_id: i + 1,
-          dialogue: redactSecrets(`${plan.title}. ${factValues.slice(0, 2).join(". ")}.`),
-          grounding_source_id: plan.grounding_source_ids[0],
-          runware_b_roll_prompt: null,
-          ui_action_card: plan.ui_action_suggestion,
-        };
-      }
-
-      timeline_segments.push(segment);
+      // Skip REALIZER (Phase 3) and Module State Update (Phase 5) to save cost/latency
+      return new Response(JSON.stringify({ 
+        script_id: cachedScript.id, 
+        script_json: cachedScript.script_json,
+        cached: true
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // ── PHASE 4: Final validation + persistence ────────────────────────────────
+    // ── PHASE 3: LLM Realizer ───────────────────────────────────────────────
+    const timeline_segments = [];
+    for (let i = 0; i < segmentPlans.length; i++) {
+        const plan = segmentPlans[i];
+        let segment = null;
+        let lastRawOutput = "";
+        let lastError = "";
+
+        // Attempt 1: initial realize
+        try {
+            const realized = await realizeSegment(i + 1, plan, persona, config.OPENAI_API_KEY!);
+            lastRawOutput = JSON.stringify(realized);
+            const parsed = BriefingSegmentSchema.parse(realized);
+            validateSegmentGrounding(parsed, plan.grounding_source_ids);
+            segment = { ...parsed, dialogue: redactSecrets(parsed.dialogue) };
+        } catch (err: any) {
+            lastError = err.message;
+            console.warn(`Segment ${i + 1} attempt 1 failed: ${err.message}`);
+        }
+
+        // Attempt 2: repair
+        if (!segment) {
+            try {
+                const repaired = await repairSegment(i + 1, plan, lastRawOutput, lastError, persona, config.OPENAI_API_KEY!);
+                const parsed = BriefingSegmentSchema.parse(repaired);
+                validateSegmentGrounding(parsed, plan.grounding_source_ids);
+                segment = { ...parsed, dialogue: redactSecrets(parsed.dialogue) };
+            } catch (repairErr: any) {
+                console.warn(`Segment ${i + 1} repair failed: ${repairErr.message}. Fallback.`);
+            }
+        }
+
+        // Fallback
+        if (!segment) {
+            const factValues = Object.values(plan.facts).filter(v => typeof v === "string" || typeof v === "number");
+            segment = {
+                segment_id: i + 1,
+                dialogue: redactSecrets(`${plan.title}. ${factValues.slice(0, 2).join(". ")}.`),
+                grounding_source_id: plan.grounding_source_ids[0],
+                runware_b_roll_prompt: null,
+                ui_action_card: plan.ui_action_suggestion,
+            };
+        }
+        timeline_segments.push(segment);
+    }
+
+    // ── PHASE 4: Persistence ────────────────────────────────────────────────
     const scriptJson = {
       script_metadata: { persona_applied: persona, total_estimated_segments: timeline_segments.length },
       timeline_segments,
@@ -187,54 +272,33 @@ serve(async (req: Request) => {
 
     const { data: scriptData, error: dbErr } = await supabase
       .from("briefing_scripts")
-      .insert({ user_id: userId, persona, script_json: scriptJson })
+      .insert({ user_id: userId, persona, script_json: scriptJson, plan_hash: planHash })
       .select().single();
 
     if (dbErr) throw dbErr;
 
-    // ── PHASE 4b: Audit Logging ─────────────────────────────────────────────
+    // 4b: Audit
     await logAudit(supabase, userId, "generate_script", { 
       script_id: scriptData.id, 
       profile_id,
       segments_count: timeline_segments.length 
     });
 
-    // ── PHASE 4c: Background Sync Trigger (Profile-aware Orchestrator) ───────
-    const triggerSync = async () => {
-      if (!profile_id) return;
-      try {
-        const syncUrl = `${config.SUPABASE_URL}/functions/v1/sync-required-connectors`;
-        await fetch(syncUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
-            "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
-          },
-          body: JSON.stringify({ profile_id, mode: "best_effort" })
-        });
-      } catch (err) {
-        console.warn("Background sync-required-connectors failed:", err);
-      }
-    };
-
+    // 4c: Background Sync
     if ((globalThis as any).EdgeRuntime?.waitUntil) {
       (globalThis as any).EdgeRuntime.waitUntil(triggerSync());
     } else {
       triggerSync();
     }
 
-    // ── PHASE 5: Update per-module last_seen_at (after successful DB write) ───
+    // ── PHASE 5: Module State Update ────────────────────────────────────────
     if (profile_id && enabledModules.length > 0) {
       const now = new Date().toISOString();
-
-      // For ai_news_delta: use newest included news item timestamp
       let newsDeltaTs = now;
       if (sanitizedData.news_items && sanitizedData.news_items.length > 0) {
         const newest = sanitizedData.news_items
           .map(n => n.published_time_iso)
-          .sort()
-          .reverse()[0];
+          .sort().reverse()[0];
         if (newest) newsDeltaTs = newest;
       }
 
@@ -245,16 +309,7 @@ serve(async (req: Request) => {
         updated_at: now,
       }));
 
-      await supabase
-        .from("briefing_module_state")
-        .upsert(moduleStateRows, { onConflict: "user_id,module_id" });
-    }
-
-    // Legacy briefing_user_state update
-    if (auth.mode !== "internal_key") {
-      await supabase
-        .from("briefing_user_state")
-        .upsert({ user_id: userId, last_briefed_at: new Date().toISOString() }, { onConflict: "user_id" });
+      await supabase.from("briefing_module_state").upsert(moduleStateRows, { onConflict: "user_id,module_id" });
     }
 
     return new Response(JSON.stringify({ script_id: scriptData.id, script_json: scriptJson }), {

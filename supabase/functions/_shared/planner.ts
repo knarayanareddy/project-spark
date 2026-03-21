@@ -141,7 +141,8 @@ export function planSegments({ enabledModules, moduleSettings, userData }: Plann
       });
 
       // Individual items
-      topNews.forEach((news, idx) => {
+      const sortedNews = [...topNews].sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0));
+      sortedNews.forEach((news, idx) => {
         emit({
           plan_id: `news_${news.source_id}`,
           segment_kind: "news_item",
@@ -171,7 +172,8 @@ export function planSegments({ enabledModules, moduleSettings, userData }: Plann
         b_roll_hint: "Code review screen, git activity graph",
       });
 
-      topPRs.forEach(pr => {
+      const sortedPRs = [...topPRs].sort((a, b) => (a.priority ? -1 : 1) || 0); // Watchlist items first
+      sortedPRs.forEach(pr => {
         emit({
           plan_id: `gh_${pr.source_id}`,
           segment_kind: "github_pr",
@@ -201,7 +203,8 @@ export function planSegments({ enabledModules, moduleSettings, userData }: Plann
         b_roll_hint: null,
       });
 
-      topEmails.forEach(email => {
+      const sortedEmails = [...topEmails].sort((a, b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0));
+      sortedEmails.forEach(email => {
         emit({
           plan_id: `email_${email.source_id}`,
           segment_kind: "email_item",

@@ -43,7 +43,8 @@ serve(async (req: Request) => {
       profile_id = body.profile_id || null;
     }
 
-    // 1. Resolve profile
+    // 1. Resolve profile + Rules
+    let watchRules: any[] = [];
     if (profile_id) {
       const { data: profile } = await supabase
         .from("briefing_profiles")
@@ -56,6 +57,13 @@ serve(async (req: Request) => {
         const migrated = migrateProfileIfNeeded(profile as any);
         enabledModules = (migrated.enabled_modules || []) as ModuleId[];
         moduleSettings = migrated.module_settings || {};
+        
+        // Fetch rules
+        const { data: rules } = await supabase
+          .from("watch_rules")
+          .select("module_id, rule")
+          .eq("profile_id", profile_id);
+        watchRules = rules || [];
       }
     }
 
@@ -207,14 +215,19 @@ serve(async (req: Request) => {
       const caps = settings.caps ?? mod.defaults.maxSegments;
       const activeKeywords = settings.filter_keywords?.length > 0 ? settings.filter_keywords : globalKeywords;
       
-      userData.news_items = scoreItems(newsItems || [], activeKeywords).slice(0, caps).map((i: any) => ({
-        source_id: i.source_id,
-        title: i.title,
-        source_name: i.payload?.source_name || "RSS",
-        url: i.url,
-        published_time_iso: i.occurred_at,
-        snippet: i.summary?.slice(0, 300) || "",
-      }));
+      const newsRule = watchRules.find(r => r.module_id === "ai_news_delta")?.rule || {};
+      const { include_keywords = [], exclude_keywords = [] } = newsRule;
+
+      userData.news_items = scoreItems(newsItems || [], activeKeywords, { include_keywords, exclude_keywords })
+        .slice(0, caps).map((i: any) => ({
+          source_id: i.source_id,
+          title: i.title,
+          source_name: i.payload?.source_name || "RSS",
+          url: i.url,
+          published_time_iso: i.occurred_at,
+          snippet: i.summary?.slice(0, 300) || "",
+          priority: i.priority || false
+        }));
     }
 
     // GITHUB
@@ -222,15 +235,26 @@ serve(async (req: Request) => {
       const mod = getModule("github_prs")!;
       const settings = moduleSettings["github_prs"] || mod.defaults.settings;
       const caps = settings.caps ?? mod.defaults.maxSegments;
+      
+      const githubRule = watchRules.find(r => r.module_id === "github_prs")?.rule || {};
+      const { repos = [], authors = [], require_review_requested = false } = githubRule;
+
       const { data: prItems } = await supabase
         .from("synced_items")
         .select("*")
         .eq("user_id", userId)
         .eq("item_type", "github_pr")
         .order("occurred_at", { ascending: false })
-        .limit(caps);
+        .limit(50); // Fetch more for filtering
 
-      userData.github_prs = (prItems || []).map((i: any) => ({
+      const filteredPrs = (prItems || []).filter(i => {
+        if (repos.length > 0 && !repos.includes(i.payload?.repo)) return false;
+        if (authors.length > 0 && !authors.includes(i.payload?.author)) return false;
+        if (require_review_requested && i.payload?.status !== "review_requested") return false;
+        return true;
+      });
+
+      userData.github_prs = filteredPrs.slice(0, caps).map((i: any) => ({
         source_id: i.source_id,
         repo: i.payload?.repo || "Unknown Repo",
         title: i.title,
@@ -238,6 +262,7 @@ serve(async (req: Request) => {
         author_display: i.payload?.author || "Unknown",
         status: i.payload?.status || "open",
         updated_time_iso: i.occurred_at,
+        priority: true // GitHub watchlist items are high priority by default if filtered
       }));
     }
 
@@ -246,15 +271,28 @@ serve(async (req: Request) => {
       const mod = getModule("inbox_triage")!;
       const settings = moduleSettings["inbox_triage"] || mod.defaults.settings;
       const caps = settings.caps ?? mod.defaults.maxSegments;
+
+      const inboxRule = watchRules.find(r => r.module_id === "inbox_triage")?.rule || {};
+      const { include_senders = [], include_subject_keywords = [] } = inboxRule;
+
       const { data: emailItems } = await supabase
         .from("synced_items")
         .select("*")
         .eq("user_id", userId)
         .eq("item_type", "email")
         .order("occurred_at", { ascending: false })
-        .limit(caps);
+        .limit(50);
 
-      userData.emails_unread = (emailItems || []).map((i: any) => ({
+      const filteredEmails = (emailItems || []).map(i => {
+        const fromVal = i.payload?.from || "";
+        const titleVal = i.title || "";
+        let priority = false;
+        if (include_senders.some((s: string) => fromVal.toLowerCase().includes(s.toLowerCase()))) priority = true;
+        if (include_subject_keywords.some((s: string) => titleVal.toLowerCase().includes(s.toLowerCase()))) priority = true;
+        return { ...i, priority };
+      }).sort((a,b) => (b.priority ? 1 : 0) - (a.priority ? 1 : 0));
+
+      userData.emails_unread = filteredEmails.slice(0, caps).map((i: any) => ({
         source_id: i.source_id,
         from_display: i.payload?.from || "Unknown",
         subject: i.title,
@@ -262,6 +300,7 @@ serve(async (req: Request) => {
         received_time_iso: i.occurred_at,
         email_id: i.payload?.email_id || i.source_id,
         thread_id: i.payload?.thread_id || "",
+        priority: i.priority
       }));
     }
 
@@ -298,14 +337,32 @@ serve(async (req: Request) => {
   }
 });
 
-function scoreItems(items: any[], keywords: string[]): any[] {
-  return items.map(item => {
-    let score = 0;
+function scoreItems(items: any[], keywords: string[], rule: { include_keywords?: string[], exclude_keywords?: string[] } = {}): any[] {
+  const { include_keywords = [], exclude_keywords = [] } = rule;
+  
+  return items.filter(item => {
     const searchSpace = `${item.title} ${item.summary || ""}`.toLowerCase();
+    // Deterministic exclusion
+    if (exclude_keywords.some(kw => searchSpace.includes(kw.toLowerCase()))) return false;
+    return true;
+  }).map(item => {
+    let score = 0;
+    let priority = false;
+    const searchSpace = `${item.title} ${item.summary || ""}`.toLowerCase();
+    
+    // Legacy scoring
     keywords.forEach(kw => { if (searchSpace.includes(kw.toLowerCase())) score += 3; });
+    
+    // Watchlist Inclusion (Higher Priority)
+    if (include_keywords.some(kw => searchSpace.includes(kw.toLowerCase()))) {
+      score += 10;
+      priority = true;
+    }
+
     const ageMs = Date.now() - new Date(item.occurred_at).getTime();
     if (ageMs < 6 * 60 * 60 * 1000) score += 2;
-    return { ...item, score };
+    
+    return { ...item, score, priority };
   }).sort((a, b) => b.score - a.score || new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
 }
 
