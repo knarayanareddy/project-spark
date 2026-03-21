@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
+import { authorizeRequest } from "../_shared/auth.ts";
 import { falAvatarProvider } from "../_shared/providers/falAvatar.ts";
 import { runwareProvider } from "../_shared/providers/runware.ts";
 import { veedAvatarProvider } from "../_shared/providers/veedAvatar.ts";
@@ -9,7 +10,7 @@ validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key",
 };
 
 serve(async (req) => {
@@ -17,34 +18,11 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const authHeader = req.headers.get("Authorization");
-  const internalKey = req.headers.get("x-internal-api-key");
-  
-  let isAuthorized = false;
-
-  // 1. Check for Supabase Auth Session (JWT)
-  if (authHeader) {
-    try {
-      const supabase = createClient(
-        Deno.env.get("SUPABASE_URL") ?? "",
-        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-        { global: { headers: { Authorization: authHeader } } }
-      );
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (user && !error) isAuthorized = true;
-    } catch (e) {
-      console.warn("JWT auth failed, falling back to internal key if provided.");
-    }
-  }
-
-  // 2. Fallback to Internal API Key (Hackathon Mode)
-  if (!isAuthorized && config.INTERNAL_API_KEY && internalKey === config.INTERNAL_API_KEY) {
-    isAuthorized = true;
-  }
-
-  if (!isAuthorized) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
+  // Unified authorization check
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), {
+      status: auth.status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

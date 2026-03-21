@@ -1,12 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { config, validateConfig } from "../_shared/config.ts";
+import { authorizeRequest } from "../_shared/auth.ts";
 
 validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key",
 };
 
 serve(async (req) => {
@@ -14,10 +15,11 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const internalKey = req.headers.get("x-internal-api-key");
-  if (!config.INTERNAL_API_KEY || internalKey !== config.INTERNAL_API_KEY) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
+  // Unified authorization check
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), {
+      status: auth.status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

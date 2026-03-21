@@ -5,12 +5,15 @@ export const config = {
   FAL_KEY: Deno.env.get("FAL_KEY"),
   VEED_API_KEY: Deno.env.get("VEED_API_KEY"),
   SUPABASE_URL: Deno.env.get("SUPABASE_URL"),
+  SUPABASE_ANON_KEY: Deno.env.get("SUPABASE_ANON_KEY"),
   SUPABASE_SERVICE_ROLE_KEY: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
   AVATAR_PROVIDER: Deno.env.get("AVATAR_PROVIDER") || "fal",
   ENABLE_RUNWARE: Deno.env.get("ENABLE_RUNWARE") !== "false",
   MAX_BROLL_SEGMENTS: parseInt(Deno.env.get("MAX_BROLL_SEGMENTS") || "5"),
   DEFAULT_AVATAR_IMAGE_URL: Deno.env.get("DEFAULT_AVATAR_IMAGE_URL") || "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=800",
 };
+
+export type Config = typeof config;
 
 export function validateConfig() {
   const required = [
