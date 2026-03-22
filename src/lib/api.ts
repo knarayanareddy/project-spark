@@ -1,15 +1,21 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-const FUNCTIONS_BASE = `https://${PROJECT_ID}.supabase.co/functions/v1`;
+// --- Configuration & Base Request Logic ---
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co`;
+const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 
 let internalApiKey = "";
 export const setInternalApiKey = (key: string) => { internalApiKey = key; };
 export const getInternalApiKey = () => internalApiKey;
 
+/**
+ * Universal caller for Supabase Edge Functions.
+ * Handles Auth, Headers, and Error normalization.
+ */
 async function callEdgeFunction<T>(
   fnName: string,
-  options: { method?: string; body?: unknown; params?: Record<string, string> } = {}
+  options: { method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown; params?: Record<string, string> } = {}
 ): Promise<T> {
   const { method = "POST", body, params } = options;
   const url = new URL(`${FUNCTIONS_BASE}/${fnName}`);
@@ -17,17 +23,17 @@ async function callEdgeFunction<T>(
 
   const { data: sessionData } = await supabase.auth.getSession();
   const session = sessionData.session;
-
   const demoAuthMode = import.meta.env.VITE_DEMO_AUTH_MODE || "internal_key";
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+    "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   };
 
   if (session) {
     headers["Authorization"] = `Bearer ${session.access_token}`;
   } else if (demoAuthMode === "internal_key") {
+    // Backend authorizeRequest supports x-internal-api-key and x-preview-user-id
     headers["x-internal-api-key"] = internalApiKey || "hackathon_unlocked_preview_2024";
     headers["x-preview-user-id"] = "00000000-0000-0000-0000-000000000000";
   }
@@ -39,16 +45,105 @@ async function callEdgeFunction<T>(
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Edge function ${fnName} failed (${res.status}): ${text}`);
+    let errorMsg = `Edge function ${fnName} failed (${res.status})`;
+    try {
+      const errorJson = await res.json();
+      errorMsg = errorJson.error || errorJson.message || errorMsg;
+    } catch {
+      const text = await res.text();
+      if (text) errorMsg = text;
+    }
+    throw new Error(errorMsg);
   }
+
   return res.json();
 }
 
-// Briefing Core
-export async function generateScript(payload: any) {
-  return callEdgeFunction<{ script_id: string; script_json: any }>("generate-script", {
-    body: payload || {},
+// --- Domain Interfaces ---
+
+export interface SegmentStatus {
+  segment_id: number;
+  avatar_video_url: string | null;
+  b_roll_image_url: string | null;
+  ui_action_card: any;
+  dialogue: string;
+  grounding_source_id: string;
+  status: "queued" | "rendering" | "complete" | "failed";
+  error: string | null;
+}
+
+export interface JobStatusResponse {
+  status: "pending" | "rendering" | "complete" | "failed";
+  progress?: {
+    total: number;
+    queued: number;
+    rendering: number;
+    complete: number;
+    failed: number;
+    percent_complete: number;
+  };
+  segments: SegmentStatus[];
+  error_message?: string;
+}
+
+export interface BriefingProfile {
+  id: string;
+  name: string;
+  persona: string | null;
+  timezone: string | null;
+  frequency: "manual" | "daily" | "twice_daily" | "hourly";
+  enabled_modules: string[];
+  module_settings: Record<string, any>;
+  updated_at: string;
+}
+
+export interface HistoryItem {
+  id: string;
+  created_at: string;
+  persona: string;
+  profile_id: string | null;
+  profile_name: string | null;
+  trigger: "manual" | "scheduled";
+  scheduled_for: string | null;
+  title: string | null;
+  segments_count: number;
+  render_job: {
+    id: string;
+    status: string;
+    updated_at: string;
+    error: string | null;
+  } | null;
+  archived: boolean;
+}
+
+export interface UserSettings {
+  user_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  timezone: string;
+  location_text: string | null;
+  location_lat: number | null;
+  location_lon: number | null;
+  notification_prefs: Record<string, boolean>;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Briefing Core Actions ---
+
+/**
+ * Rewritten GenerateScript signature per requirements.
+ */
+export async function generateScript(payload: {
+  profile_id?: string
+  user_preferences?: any
+  user_data?: any
+  trigger?: 'manual' | 'scheduled'
+  scheduled_for?: string
+  title?: string
+}): Promise<{ script_id: string; script_json: any; cached?: boolean }> {
+  return callEdgeFunction<{ script_id: string; script_json: any; cached?: boolean }>("generate-script", {
+    body: payload,
   });
 }
 
@@ -68,31 +163,6 @@ export async function startRender(scriptId: string) {
   });
 }
 
-export interface SegmentStatus {
-  segment_id: number;
-  avatar_video_url: string | null;
-  b_roll_image_url: string | null;
-  ui_action_card: unknown;
-  dialogue: string;
-  grounding_source_id: string;
-  status: string;
-  error: string | null;
-}
-
-export interface JobStatusResponse {
-  status: string;
-  progress?: {
-    total: number;
-    queued: number;
-    rendering: number;
-    complete: number;
-    failed: number;
-    percent_complete: number;
-  };
-  segments: SegmentStatus[];
-  error_message?: string;
-}
-
 export async function getJobStatus(jobId: string) {
   return callEdgeFunction<JobStatusResponse>("job-status", {
     method: "GET",
@@ -106,17 +176,7 @@ export async function assembleUserData(profileId?: string) {
   });
 }
 
-// Profile Management
-export interface BriefingProfile {
-  id: string;
-  name: string;
-  persona: string | null;
-  timezone: string | null;
-  frequency: string | null;
-  enabled_modules: string[];
-  module_settings: Record<string, any>;
-  updated_at: string;
-}
+// --- Profile & Module Management ---
 
 export async function getProfiles() {
   return await callEdgeFunction<BriefingProfile[]>("get-profiles", { method: "GET" });
@@ -134,7 +194,8 @@ export async function getModuleCatalog() {
   return await callEdgeFunction<any[]>("get-module-catalog", { method: "GET" });
 }
 
-// Reading List
+// --- Reading List ---
+
 export async function addToReadingList(item: { source_id: string; title: string; url: string }) {
   return await callEdgeFunction<any>("manage-reading-list", {
     body: { action: "add", item }
@@ -151,7 +212,8 @@ export async function getReadingList() {
   return await callEdgeFunction<any[]>("manage-reading-list", { method: "GET" });
 }
 
-// Connectors & Testing
+// --- Connectors, Sync & Test ---
+
 export async function getConnectorStatus() {
   return callEdgeFunction<any[]>("connector-status", { method: "GET" });
 }
@@ -197,30 +259,17 @@ export async function disconnectConnector(provider: string) {
 
 export async function startGoogleOAuth(redirect_url: string) {
   return callEdgeFunction<{url: string}>("google-oauth-start", {
-    method: "POST",
     body: { redirect_url }
   });
 }
 
-// History & Sharing
-export interface HistoryItem {
-  id: string;
-  created_at: string;
-  persona: string;
-  profile_id: string | null;
-  profile_name: string | null;
-  trigger: string;
-  scheduled_for: string | null;
-  title: string | null;
-  segments_count: number;
-  render_job: {
-    id: string;
-    status: string;
-    updated_at: string;
-    error: string | null;
-  } | null;
-  archived: boolean;
+export async function completeGoogleOAuth(code: string, state: string) {
+  return callEdgeFunction<any>("google-oauth-complete", {
+    body: { code, state }
+  });
 }
+
+// --- History & Retrieval ---
 
 export async function listHistory(limit = 50, offset = 0, includeArchived = false) {
   return callEdgeFunction<{ items: HistoryItem[]; limit: number; offset: number }>("list-history", {
@@ -235,6 +284,28 @@ export async function getBriefing(scriptId: string) {
     params: { script_id: scriptId },
   });
 }
+
+export async function getBriefingSources(scriptId: string) {
+  return callEdgeFunction<any>("get-briefing-sources", {
+    method: "GET",
+    params: { script_id: scriptId },
+  });
+}
+
+export async function getBriefingArtifacts(scriptId: string) {
+  return callEdgeFunction<any>("get-briefing-artifacts", {
+    method: "GET",
+    params: { script_id: scriptId },
+  });
+}
+
+export async function archiveBriefing(scriptId: string) {
+  return callEdgeFunction<{ success: boolean }>("archive-briefing", {
+    body: { script_id: scriptId },
+  });
+}
+
+// --- Sharing ---
 
 export async function createShareLink(scriptId: string, jobId?: string | null, options?: any) {
   return callEdgeFunction<{ share_id: string, token: string, share_url: string }>("create-share-link", {
@@ -255,40 +326,7 @@ export async function getSharedBriefing(token: string) {
   });
 }
 
-export async function getBriefingSources(scriptId: string) {
-  return callEdgeFunction<any>("get-briefing-sources", {
-    method: "GET",
-    params: { script_id: scriptId },
-  });
-}
-
-export async function getBriefingArtifacts(scriptId: string) {
-  return callEdgeFunction<any>("get-briefing-artifacts", {
-    method: "GET",
-    params: { script_id: scriptId },
-  });
-}
-
-export async function archiveBriefing(scriptId: string) {
-  return callEdgeFunction<{ success: boolean }>("archive-briefing", {
-    method: "POST",
-    body: { script_id: scriptId },
-  });
-}
-
-// User Settings & Privacy
-export interface UserSettings {
-  user_id: string;
-  display_name: string | null;
-  avatar_url: string | null;
-  timezone: string;
-  location_text: string | null;
-  location_lat: number | null;
-  location_lon: number | null;
-  notification_prefs: Record<string, boolean>;
-  created_at: string;
-  updated_at: string;
-}
+// --- Settings, Stats & Health ---
 
 export async function getUserSettings() {
   return callEdgeFunction<UserSettings>("get-user-settings", { method: "GET" });
@@ -296,7 +334,6 @@ export async function getUserSettings() {
 
 export async function updateUserSettings(payload: Partial<UserSettings>) {
   return callEdgeFunction<UserSettings>("update-user-settings", {
-    method: "POST",
     body: payload,
   });
 }
@@ -305,22 +342,30 @@ export async function listAuditEvents() {
   return callEdgeFunction<{ events: any[] }>("list-audit-events", { method: "GET" });
 }
 
-export async function touchSession(sessionData: any) {
-  return callEdgeFunction<{ ok: boolean }>("touch-session", {
-    method: "POST",
-    body: sessionData,
-  });
+export async function getUsageStats() {
+  return callEdgeFunction<any>("get-usage-stats", { method: "GET" });
+}
+
+export async function getSystemKeyStatus() {
+  return callEdgeFunction<Record<string, boolean>>("system-key-status", { method: "GET" });
+}
+
+export async function getConnectorCredentialStatus() {
+  return callEdgeFunction<Record<string, boolean>>("connector-credential-status", { method: "GET" });
 }
 
 export async function listSessions() {
   return callEdgeFunction<{ sessions: any[] }>("list-sessions", { method: "GET" });
 }
 
-export async function getUsageStats() {
-  return callEdgeFunction<any>("get-usage-stats", { method: "GET" });
+export async function touchSession(sessionData: any) {
+  return callEdgeFunction<{ ok: boolean }>("touch-session", {
+    body: sessionData,
+  });
 }
 
-// Integration Lab & Preflight
+// --- Integration Lab & Preflight ---
+
 export const systemPreflight = async () => {
   return await callEdgeFunction<any>("system-preflight", { method: "GET" });
 };
@@ -333,20 +378,19 @@ export const seedDummyIntel = async (payload: {
   include: { rss?: boolean, github?: boolean, slack?: boolean, google?: boolean },
   mark_connected?: boolean 
 }) => {
-  return await callEdgeFunction<any>("seed-dummy-intel", { method: "POST", body: payload });
+  return await callEdgeFunction<any>("seed-dummy-intel", { body: payload });
 };
 
 export const testRssSync = async (url: string) => {
-  return await callEdgeFunction<any>("test-rss", { method: "POST", body: { url } });
+  return await callEdgeFunction<any>("test-rss", { body: { url } });
 };
 
 export const testGitHubSync = async (pat: string) => {
   return await callEdgeFunction<any>("test-github", { 
-    method: "POST", 
     body: { p_a_t: pat },
   });
 };
 
 export const testSlackSync = async (token: string) => {
-  return await callEdgeFunction<any>("test-slack", { method: "POST", body: { token } });
+  return await callEdgeFunction<any>("test-slack", { body: { token } });
 };

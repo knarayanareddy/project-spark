@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { 
   Archive, Share2, Search, Bell, Radio, User, Activity, Zap, TrendingUp,
   Database, Cloud, Shield, MessageSquare, Sparkles, Link as LinkIcon, 
-  ChevronRight, ChevronDown, Play, FileText, CheckCircle2, Loader2, Github, Mail, Rss, RefreshCw, Clock
+  ChevronRight, ChevronDown, Play, FileText, CheckCircle2, Loader2, Github, Mail, Rss, RefreshCw, Clock, Copy
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";

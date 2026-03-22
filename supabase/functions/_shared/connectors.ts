@@ -77,23 +77,29 @@ export async function upsertSyncedItems(supabase: SupabaseClient, items: Partial
  * Standardized status builder for the dashboard.
  */
 export async function getConnectorStatusSummary(supabase: SupabaseClient, userId: string) {
-  const { data: health, error: healthErr } = await supabase
+  const providers = ["rss", "github", "slack", "google", "notion"];
+  
+  const { data: configs } = await supabase
+    .from("connector_configs")
+    .select("provider")
+    .eq("user_id", userId);
+
+  const { data: health } = await supabase
     .from("connector_health")
     .select("*")
     .eq("user_id", userId);
 
-  if (healthErr) throw healthErr;
+  const { data: secrets } = await supabase
+    .from("connector_secrets")
+    .select("provider")
+    .eq("user_id", userId);
 
-  // Get latest run for each provider
-  const { data: runs, error: runErr } = await supabase
+  const { data: runs } = await supabase
     .from("connector_sync_runs")
     .select("*")
     .eq("user_id", userId)
     .order("started_at", { ascending: false });
 
-  if (runErr) throw runErr;
-
-  // Group runs by provider and pick the first (latest)
   const latestRuns = new Map<string, any>();
   runs?.forEach((run: any) => {
     if (!latestRuns.has(run.provider)) {
@@ -101,8 +107,20 @@ export async function getConnectorStatusSummary(supabase: SupabaseClient, userId
     }
   });
 
-  return health.map((h: any) => ({
-    ...h,
-    last_run: latestRuns.get(h.provider) || null
-  }));
+  const connectedProviders = new Set((configs || []).map((c: any) => c.provider));
+  const secretProviders = new Set((secrets || []).map((s: any) => s.provider));
+  const healthMap = new Map((health || []).map((h: any) => [h.provider, h]));
+
+  return providers.map(p => {
+    const h = healthMap.get(p) as any;
+    return {
+      provider: p,
+      connected: connectedProviders.has(p),
+      secret_present: secretProviders.has(p),
+      status: h?.status || (connectedProviders.has(p) ? "active" : "missing"),
+      last_success_at: h?.last_success_at || null,
+      last_error_message: h?.last_error_message || null,
+      last_run: latestRuns.get(p) || null
+    };
+  });
 }

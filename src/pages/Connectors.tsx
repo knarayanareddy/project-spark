@@ -20,7 +20,7 @@ import { StatCard } from "@/components/connectors/ConnectorCard";
 import ConnectorCard from "@/components/connectors/ConnectorCard";
 import SystemEvents, { OrchestrationHealth } from "@/components/connectors/DashboardPanels";
 import ConfigModal from "@/components/connectors/ConfigModal";
-import { getConnectorStatus, getUserSettings, type UserSettings } from "@/lib/api";
+import { getConnectorStatus, getUserSettings, triggerSync, type UserSettings } from "@/lib/api";
 import { useToast } from "@/components/ui/use-toast";
 import { toast as sonnerToast } from "sonner";
 
@@ -70,12 +70,25 @@ export default function Connectors() {
     setIsConfigOpen(true);
   };
 
-  const handleActionShell = async (provider: string, action: string) => {
-    toast({
-       title: `${action} initiated`,
-       description: `${action} sent for ${provider}. (Backend endpoints pending Phase 2/3).`,
-       duration: 3000,
-    });
+  const handleSyncAction = async (provider: string) => {
+    setIsLoading(true);
+    try {
+      const res = await triggerSync(provider);
+      sonnerToast.success(`Sync successful`, { 
+        description: `Ingested ${res.items_synced} items from ${provider}.` 
+      });
+      loadStatuses();
+    } catch (err: any) {
+      sonnerToast.error("Sync Failed", { description: err.message });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTestAction = async (provider: string) => {
+    // For simplicity, if they click test on the card, we open the config modal 
+    // where they can see specific errors or provide missing credentials.
+    handleConfigure(provider === 'rss' ? "Global Tech News" : provider.toUpperCase(), provider);
   };
 
   const getStatusForProvider = (provider: string) => {
@@ -171,18 +184,19 @@ export default function Connectors() {
             statusLabel={getStatusForProvider('github').status === 'error' ? 'Error' : (getStatusForProvider('github').connected ? 'Healthy' : 'Disconnected')}
             stats={[{label: 'Last Sync', value: formatRelativeTime(getStatusForProvider('github').last_run?.started_at)}, {label: 'Items', value: (getStatusForProvider('github').last_run?.items_upserted || 0).toString()}]}
             onConfigure={() => handleConfigure("GitHub Enterprise", "github")}
-            onTest={() => handleActionShell("GitHub", "Test Connection")}
-            onSync={() => handleActionShell("GitHub", "Sync Now")}
+            onTest={() => handleTestAction("github")}
+            onSync={() => handleSyncAction("github")}
           />
           <ConnectorCard 
             icon={Mail}
             iconBg="bg-blue-500/20 text-blue-400"
             title="Google Workspace"
             description="Semantic search over inbox, calendar events, and task triage."
-            status="disabled"
-            statusLabel="Requires OAuth"
-            stats={[{label: 'Status', value: 'Coming soon'}, {label: 'Items', value: '---'}]}
+            status={getStatusForProvider('google').status === 'error' ? 'error' : (getStatusForProvider('google').connected ? 'healthy' : 'warning')}
+            statusLabel={getStatusForProvider('google').status === 'error' ? 'Error' : (getStatusForProvider('google').connected ? 'Connected' : 'Requires OAuth')}
+            stats={[{label: 'Last Sync', value: formatRelativeTime(getStatusForProvider('google').last_run?.started_at)}, {label: 'Items', value: (getStatusForProvider('google').last_run?.items_upserted || 0).toString()}]}
             onConfigure={() => handleConfigure("Google Workspace", "google")}
+            onSync={() => handleSyncAction("google")}
           />
           <ConnectorCard 
             icon={Rss}
@@ -193,8 +207,8 @@ export default function Connectors() {
             statusLabel={getStatusForProvider('rss').status === 'error' ? 'Error' : (getStatusForProvider('rss').connected ? 'Healthy' : 'Needs Config')}
             stats={[{label: 'Last Sync', value: formatRelativeTime(getStatusForProvider('rss').last_run?.started_at)}, {label: 'Items', value: (getStatusForProvider('rss').last_run?.items_upserted || 0).toString()}]}
             onConfigure={() => handleConfigure("Global Tech News", "rss")}
-            onTest={() => handleActionShell("RSS", "Test Connection")}
-            onSync={() => handleActionShell("RSS", "Sync Now")}
+            onTest={() => handleTestAction("rss")}
+            onSync={() => handleSyncAction("rss")}
           />
           <ConnectorCard 
             icon={Slack}
@@ -205,8 +219,8 @@ export default function Connectors() {
             statusLabel={getStatusForProvider('slack').status === 'error' ? 'Error' : (getStatusForProvider('slack').connected ? 'Healthy' : 'Disconnected')}
             stats={[{label: 'Last Sync', value: formatRelativeTime(getStatusForProvider('slack').last_run?.started_at)}, {label: 'Items', value: (getStatusForProvider('slack').last_run?.items_upserted || 0).toString()}]}
             onConfigure={() => handleConfigure("Slack Dev Hub", "slack")}
-            onTest={() => handleActionShell("Slack", "Test Connection")}
-            onSync={() => handleActionShell("Slack", "Sync Now")}
+            onTest={() => handleTestAction("slack")}
+            onSync={() => handleSyncAction("slack")}
           />
           <ConnectorCard 
             icon={Cloud}
@@ -217,8 +231,8 @@ export default function Connectors() {
             statusLabel={getStatusForProvider('weather').status === 'error' ? 'Error' : (getStatusForProvider('weather').connected ? 'Healthy' : 'Needs Config')}
             stats={[{label: 'Last Sync', value: formatRelativeTime(getStatusForProvider('weather').last_run?.started_at)}, {label: 'Items', value: (getStatusForProvider('weather').last_run?.items_upserted || 0).toString()}]}
             onConfigure={() => handleConfigure("Local Weather", "weather")}
-            onTest={() => handleActionShell("Weather", "Test Connection")}
-            onSync={() => handleActionShell("Weather", "Sync Now")}
+            onTest={() => handleTestAction("weather")}
+            onSync={() => handleSyncAction("weather")}
           />
           <ConnectorCard 
             icon={BookOpen}
