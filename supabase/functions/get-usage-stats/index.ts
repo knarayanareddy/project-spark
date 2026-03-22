@@ -7,50 +7,50 @@ validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-user-id, x-preview-user-id",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const userId = auth.user_id!;
+  const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+  
   try {
-    const auth = await authorizeRequest(req, config);
-    if (!auth.ok || !auth.user_id) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { 
-        status: 401, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
-    }
-
-    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
-    const { data: usage, error } = await supabase
+    const { data: usage, error: uError } = await supabase
       .from("briefing_usage_limits")
-      .select("generate_count, render_count")
-      .eq("user_id", auth.user_id)
-      .eq("day", new Date().toISOString().split('T')[0])
+      .select("*")
+      .eq("user_id", userId)
       .maybeSingle();
 
-    if (error) throw error;
+    if (uError) throw uError;
 
-    const generateLimit = parseInt(Deno.env.get("DAILY_GENERATE_LIMIT") || "25");
-    const renderLimit = parseInt(Deno.env.get("DAILY_RENDER_LIMIT") || "25");
+    // Fallbacks if usage row doesn't exist yet
+    const generate_count = usage?.generate_count || 0;
+    const render_count = usage?.render_count || 0;
+    const generate_limit = usage?.generate_limit || 10;
+    const render_limit = usage?.render_limit || 5;
 
-    const stats = {
-      generate_count: usage?.generate_count || 0,
-      render_count: usage?.render_count || 0,
-      generate_limit: generateLimit,
-      render_limit: renderLimit,
-      generate_percent: Math.min(100, Math.round(((usage?.generate_count || 0) / generateLimit) * 100)),
-      render_percent: Math.min(100, Math.round(((usage?.render_count || 0) / renderLimit) * 100)),
-    };
-
-    return new Response(JSON.stringify(stats), {
+    return new Response(JSON.stringify({ 
+      generate_count,
+      render_count,
+      generate_limit,
+      render_limit,
+      generate_percent: Math.round((generate_count / generate_limit) * 100),
+      render_percent: Math.round((render_count / render_limit) * 100)
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { 
-      status: 500, 
-      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+
+  } catch (e: any) {
+    return new Response(JSON.stringify({ ok: false, message: e.message }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 });

@@ -33,9 +33,8 @@ async function callEdgeFunction<T>(
   if (session) {
     headers["Authorization"] = `Bearer ${session.access_token}`;
   } else if (demoAuthMode === "internal_key") {
-    // Backend authorizeRequest supports x-internal-api-key and x-preview-user-id
     headers["x-internal-api-key"] = internalApiKey || "hackathon_unlocked_preview_2024";
-    headers["x-preview-user-id"] = "00000000-0000-0000-0000-000000000000";
+    headers["x-preview-user-id"] = import.meta.env.VITE_DEMO_USER_ID || "00000000-0000-0000-0000-000000000000";
   }
 
   const res = await fetch(url.toString(), {

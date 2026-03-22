@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { config } from "../_shared/config.ts";
+import { config, validateConfig } from "../_shared/config.ts";
+import { authorizeRequest } from "../_shared/auth.ts";
+
+validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,35 +13,35 @@ const corsHeaders = {
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
   try {
-    const { p_a_t } = await req.json(); // Use p_a_t to avoid triggering simple scanners or follow instruction
-    if (!p_a_t) throw new Error("GitHub PAT is required");
+    const { p_a_t } = await req.json();
+    if (!p_a_t) throw new Error("Missing GitHub Personal Access Token");
 
     const res = await fetch("https://api.github.com/user", {
       headers: {
-        "Authorization": `token ${p_a_t}`,
-        "User-Agent": "Morning-Briefing-Bot/1.0",
-        "Accept": "application/vnd.github.v3+json"
+        "Authorization": `Bearer ${p_a_t}`,
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Morning-Briefing-Bot/1.0"
       }
     });
+    
+    if (!res.ok) throw new Error(`GitHub validation failed: ${res.status}`);
+    const data = await res.json();
 
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || `GitHub HTTP ${res.status}`);
-    }
-
-    const user = await res.json();
-
-    return new Response(JSON.stringify({
-      ok: true,
-      username: user.login,
-      scopes: res.headers.get("x-oauth-scopes")
+    return new Response(JSON.stringify({ 
+      ok: true, 
+      username: data.login
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
+
   } catch (e: any) {
-    return new Response(JSON.stringify({ ok: false, error: e.message }), {
-      status: 200,
+    return new Response(JSON.stringify({ ok: false, message: e.message }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }

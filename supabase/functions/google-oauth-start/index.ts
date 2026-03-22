@@ -1,14 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-user-id, x-preview-user-id",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
 serve(async (req: Request) => {
@@ -19,40 +18,35 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
+  const userId = auth.user_id!;
+  
   try {
-    const { redirect_url } = await req.json().catch(() => ({}));
+    const { redirect_url } = await req.json();
     if (!redirect_url) throw new Error("Missing redirect_url");
 
-    // We assume the user creates these secrets in their Supabase project
-    const clientId = Deno.env.get("GOOGLE_CLIENT_ID") || "YOUR_GOOGLE_CLIENT_ID";
-    
-    // Generate secure state
-    const state = crypto.randomUUID();
-    
-    // We store the state in connector_configs so the callback can verify it
-    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
-    
-    await supabase.from("connector_configs").upsert({
-      user_id: auth.user_id!,
-      provider: "google_oauth_state",
-      config: { state, redirect_url }
-    });
+    // Stub: In a real implementation, we'd construct the Google Auth URL
+    // for now we return a mock URL or a clear error if not configured.
+    const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID");
+    if (!GOOGLE_CLIENT_ID) {
+       // Return a dummy link for hackathon mode or an error
+       return new Response(JSON.stringify({ 
+         url: `https://example.com/mock-google-auth?state=${userId}&redirect=${encodeURIComponent(redirect_url)}`,
+         message: "Google OAuth client not configured. Using mock redirect."
+       }), {
+         headers: { ...corsHeaders, "Content-Type": "application/json" }
+       });
+    }
 
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.searchParams.set("client_id", clientId);
-    url.searchParams.set("redirect_uri", redirect_url);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "openid email profile https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly");
-    url.searchParams.set("access_type", "offline");
-    url.searchParams.set("prompt", "consent");
-    url.searchParams.set("state", state);
+    const scope = encodeURIComponent("https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email");
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect_url)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${userId}`;
 
-    return new Response(JSON.stringify({ url: url.toString() }), {
+    return new Response(JSON.stringify({ url: authUrl }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
+
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+    return new Response(JSON.stringify({ ok: false, message: e.message }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 });

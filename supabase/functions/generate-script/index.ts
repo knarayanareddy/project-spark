@@ -77,8 +77,9 @@ serve(async (req: Request) => {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
-              "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+              "apikey": config.SUPABASE_PUBLISHABLE_KEY!,
+              "x-internal-api-key": Deno.env.get("INTERNAL_API_KEY") || "",
+              "x-user-id": userId
             },
             signal: controller.signal
           }).catch(() => {});
@@ -97,8 +98,9 @@ serve(async (req: Request) => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
-            "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+            "apikey": config.SUPABASE_PUBLISHABLE_KEY!,
+            "x-internal-api-key": Deno.env.get("INTERNAL_API_KEY") || "",
+            "x-user-id": userId
           },
           body: JSON.stringify({ profile_id, mode: "best_effort" })
         });
@@ -133,8 +135,9 @@ serve(async (req: Request) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
-          "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+          "apikey": config.SUPABASE_PUBLISHABLE_KEY!,
+          "x-internal-api-key": Deno.env.get("INTERNAL_API_KEY") || "",
+          "x-user-id": userId
         },
         body: JSON.stringify({ profile_id }),
       });

@@ -7,39 +7,36 @@ validateConfig();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-user-id, x-preview-user-id",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const auth = await authorizeRequest(req, config);
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const userId = auth.user_id!;
+  const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+  
   try {
-    const auth = await authorizeRequest(req, config);
-    if (!auth.ok || !auth.user_id) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { 
-        status: 401, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
-    }
-
-    const body = await req.json();
-    const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
-    const userId = auth.user_id;
-
-    // Filter allowed fields for update
-    const updatePayload: any = {};
-    if (body.display_name !== undefined) updatePayload.display_name = body.display_name;
-    if (body.avatar_url !== undefined) updatePayload.avatar_url = body.avatar_url;
-    if (body.timezone !== undefined) updatePayload.timezone = body.timezone;
-    if (body.location_text !== undefined) updatePayload.location_text = body.location_text;
-    if (body.location_lat !== undefined) updatePayload.location_lat = body.location_lat;
-    if (body.location_lon !== undefined) updatePayload.location_lon = body.location_lon;
-    if (body.notification_prefs !== undefined) updatePayload.notification_prefs = body.notification_prefs;
-
-    const { data: settings, error } = await supabase
+    const payload = await req.json();
+    
+    // Remove protected fields
+    delete payload.user_id;
+    delete payload.created_at;
+    
+    const { data, error } = await supabase
       .from("user_settings")
-      .upsert({ user_id: userId, ...updatePayload })
-      .select()
+      .upsert({ 
+        user_id: userId, 
+        ...payload,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' })
+      .select("*")
       .single();
 
     if (error) throw error;
@@ -47,17 +44,17 @@ serve(async (req) => {
     // Log audit event
     await supabase.from("audit_events").insert({
       user_id: userId,
-      event_type: "settings_changed",
-      metadata: { keys: Object.keys(updatePayload) }
-    });
+      event_type: "settings_update",
+      metadata: { fields: Object.keys(payload) }
+    }).catch(() => {});
 
-    return new Response(JSON.stringify(settings), {
+    return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { 
-      status: 500, 
-      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+
+  } catch (e: any) {
+    return new Response(JSON.stringify({ ok: false, message: e.message }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 });

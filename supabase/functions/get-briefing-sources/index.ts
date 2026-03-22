@@ -8,77 +8,76 @@ validateConfig();
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-api-key, x-user-id, x-preview-user-id",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS, DELETE, PUT",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const auth = await authorizeRequest(req, config);
-  if (!auth.ok || !auth.user_id) {
-    return new Response(JSON.stringify({ error: "Access denied or missing authentication" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  if (!auth.ok) {
+    return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const userId = auth.user_id;
+  const userId = auth.user_id!;
   const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
+  
+  const url = new URL(req.url);
+  const scriptId = url.searchParams.get("script_id");
+
+  if (!scriptId) {
+    return new Response(JSON.stringify({ error: "Missing script_id" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
 
   try {
-    const url = new URL(req.url);
-    const scriptId = url.searchParams.get("script_id");
-    if (!scriptId) throw new Error("script_id query parameter is required");
-
-    // 1) Load script_json.timeline_segments
-    const { data: script, error: scriptErr } = await supabase
+    // 1. Get script to find source IDs
+    const { data: script, error: sError } = await supabase
       .from("briefing_scripts")
       .select("script_json")
       .eq("id", scriptId)
       .eq("user_id", userId)
       .single();
 
-    if (scriptErr || !script) throw new Error("Script not found or access denied");
+    if (sError) throw sError;
 
-    // 2) Extract unique grounding_source_id values from all segments
-    const segments = script.script_json?.timeline_segments || [];
-    const sourceIdsSet = new Set<string>();
-    
-    for (const seg of segments) {
-      if (seg.grounding_source_id) {
-        sourceIdsSet.add(seg.grounding_source_id);
-      }
-    }
-    
-    const uniqueSourceIds = Array.from(sourceIdsSet);
-    const missingSourceIds: string[] = [];
-    let sources: any[] = [];
-
-    // 3) Query synced_items
-    if (uniqueSourceIds.length > 0) {
-      const { data: items, error: itemsErr } = await supabase
-        .from("synced_items")
-        .select("source_id, provider, item_type, occurred_at, title, author, url, summary, payload")
-        .eq("user_id", userId)
-        .in("source_id", uniqueSourceIds);
-
-      if (itemsErr) throw itemsErr;
-      
-      sources = items || [];
-      const returnedIds = new Set(sources.map((s: any) => s.source_id));
-      
-      for (const reqId of uniqueSourceIds) {
-        if (!returnedIds.has(reqId)) {
-          missingSourceIds.push(reqId);
+    const sourceIds = new Set<string>();
+    const scriptJson = script.script_json;
+    if (scriptJson && scriptJson.timeline_segments) {
+      scriptJson.timeline_segments.forEach((seg: any) => {
+        if (seg.grounding_source_id) {
+          seg.grounding_source_id.split(',').forEach((id: string) => sourceIds.add(id.trim()));
         }
-      }
+      });
     }
 
-    // 4) Return
-    return new Response(JSON.stringify({ sources, missing_source_ids: missingSourceIds }), {
+    const idsAtoms = Array.from(sourceIds);
+    if (idsAtoms.length === 0) {
+      return new Response(JSON.stringify({ sources: [], missing_source_ids: [] }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    // 2. Resolve IDs to synced_items
+    const { data: sources, error: srcError } = await supabase
+      .from("synced_items")
+      .select("*")
+      .eq("user_id", userId)
+      .in("source_id", idsAtoms);
+
+    if (srcError) throw srcError;
+
+    const foundIds = new Set(sources?.map(s => s.source_id));
+    const missingIds = idsAtoms.filter(id => !foundIds.has(id));
+
+    return new Response(JSON.stringify({ 
+      sources: sources || [], 
+      missing_source_ids: missingIds 
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
+
   } catch (e: any) {
-    console.error("get-briefing-sources error:", e.message);
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
+    return new Response(JSON.stringify({ ok: false, message: e.message }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
