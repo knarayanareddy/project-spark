@@ -9,6 +9,16 @@ const corsHeaders = {
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // SECURE: Require INTERNAL_API_KEY for diagnostic access
+  const authHeader = req.headers.get("x-internal-api-key");
+  const requiredKey = Deno.env.get("INTERNAL_API_KEY");
+  if (!authHeader || authHeader !== requiredKey) {
+    return new Response(JSON.stringify({ error: "unauthorized", detail: "Internal API Key required for diagnostic access" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
   try {
     const status = {
       openai: !!Deno.env.get("OPENAI_API_KEY"),

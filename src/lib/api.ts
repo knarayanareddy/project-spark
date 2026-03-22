@@ -33,8 +33,14 @@ async function callEdgeFunction<T>(
   if (session) {
     headers["Authorization"] = `Bearer ${session.access_token}`;
   } else if (demoAuthMode === "internal_key") {
+    // Standardize developer preview/demo mode headers
+    const demoId = import.meta.env.VITE_DEMO_USER_ID;
+    if (!demoId || demoId === "00000000-0000-0000-0000-000000000000") {
+      console.warn("VITE_DEMO_USER_ID is missing or default. Edge Functions may reject requests.");
+    }
     headers["x-internal-api-key"] = internalApiKey || "hackathon_unlocked_preview_2024";
-    headers["x-preview-user-id"] = import.meta.env.VITE_DEMO_USER_ID || "00000000-0000-0000-0000-000000000000";
+    headers["x-user-id"] = demoId || "00000000-0000-0000-0000-000000000000";
+    headers["x-preview-user-id"] = demoId || "00000000-0000-0000-0000-000000000000";
   }
 
   const res = await fetch(url.toString(), {

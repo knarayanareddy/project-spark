@@ -21,7 +21,10 @@ serve(async (req) => {
     return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 
-  const userId = auth.user_id!
+  if (!auth.user_id) {
+    return new Response(JSON.stringify({ error: "user_context_required", detail: "This endpoint requires a valid user context." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  const userId = auth.user_id;
   const supabaseClient = createClient(
     config.SUPABASE_URL!,
     config.SUPABASE_SERVICE_ROLE_KEY!

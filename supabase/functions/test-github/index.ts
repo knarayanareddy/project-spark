@@ -33,9 +33,12 @@ serve(async (req: Request) => {
     if (!res.ok) throw new Error(`GitHub validation failed: ${res.status}`);
     const data = await res.json();
 
+    const scopes = res.headers.get("x-oauth-scopes") || "none";
+
     return new Response(JSON.stringify({ 
       ok: true, 
-      username: data.login
+      username: data.login,
+      scopes: scopes
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });

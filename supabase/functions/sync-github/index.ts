@@ -23,7 +23,10 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify(auth.body), { status: auth.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  const userId = auth.user_id!;
+  if (!auth.user_id) {
+    return new Response(JSON.stringify({ error: "user_context_required", detail: "This endpoint requires a valid user context (JWT or x-user-id header)." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  const userId = auth.user_id;
   const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
   const provider = "github";
 

@@ -30,7 +30,10 @@ serve(async (req: Request) => {
   }
 
   const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
-  const userId = auth.user_id!;
+  if (!auth.user_id) {
+    return new Response(JSON.stringify({ error: "user_context_required", detail: "This endpoint requires a valid user context (JWT or x-user-id header)." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  const userId = auth.user_id;
 
   // ── PHASE 0: Usage Limits ────────────────────────────────────────────────
   const GEN_LIMIT = parseInt(Deno.env.get("DAILY_GENERATE_LIMIT") || "10");

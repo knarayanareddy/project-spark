@@ -38,26 +38,20 @@ export async function authorizeRequest(
 
   // 2. Try Internal Key Mode (Hackathon/Legacy)
   const masterPreviewKey = "hackathon_unlocked_preview_2024";
-  if (internalKey && (config.INTERNAL_API_KEY || internalKey === masterPreviewKey)) {
-    if (internalKey === config.INTERNAL_API_KEY || internalKey === masterPreviewKey) {
-      const xUserId = req.headers.get("x-user-id");
-      
-      if (xUserId) {
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(xUserId)) {
-          return { ok: false, status: 400, body: { error: "Invalid x-user-id format" } };
-        }
-        return { ok: true, mode: "internal_key", user_id: xUserId };
+  const providedKey = internalKey || "";
+  
+  if (providedKey && (config.INTERNAL_API_KEY === providedKey || providedKey === masterPreviewKey)) {
+    const xUserId = req.headers.get("x-user-id") || req.headers.get("x-preview-user-id");
+    
+    if (xUserId) {
+      if (!isUuid(xUserId)) {
+        return { ok: false, status: 400, body: { error: "invalid_user_id_format", detail: "x-user-id or x-preview-user-id must be a valid UUID" } };
       }
-
-      const previewUserId = req.headers.get("x-preview-user-id");
-      if (previewUserId) {
-        return { ok: true, mode: "internal_key", user_id: previewUserId };
-      }
-
-      // Fallback for non-user-scoped endpoints
-      return { ok: true, mode: "internal_key" };
+      return { ok: true, mode: "internal_key", user_id: xUserId };
     }
+
+    // Fallback for non-user-scoped endpoints
+    return { ok: true, mode: "internal_key" };
   }
 
   // 3. Unauthorized
@@ -66,4 +60,9 @@ export async function authorizeRequest(
     status: 401,
     body: { error: "unauthorized" },
   };
+}
+
+/** Simple UUID v4/v1 regex validation */
+export function isUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }

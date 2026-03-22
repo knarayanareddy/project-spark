@@ -41,13 +41,42 @@ Copy `.env.example` to `.env` and configure:
 - `INTERNAL_API_KEY`: Secure Edge Function authentication.
 
 ### 2. Deploy Infrastructure
-1.  **Migrations**: Run SQL files in `supabase/migrations/`.
+1.  **Migrations**: Run SQL files in `supabase/migrations/` sequentially.
 2.  **Edge Functions**:
+    Deploy the full suite of 20+ specialized functions. These functions support both standard Supabase JWT auth and a high-performance `INTERNAL_API_KEY` mode for cross-service orchestration.
+
     ```bash
+    # Core Orchestration
     supabase functions deploy generate-script --no-verify-jwt
     supabase functions deploy start-render --no-verify-jwt
     supabase functions deploy job-status --no-verify-jwt
+    supabase functions deploy assemble-user-data --no-verify-jwt
+
+    # Connectors & Telemetry
+    supabase functions deploy connector-status --no-verify-jwt
+    supabase functions deploy test-rss --no-verify-jwt
+    supabase functions deploy test-github --no-verify-jwt
+    supabase functions deploy test-slack --no-verify-jwt
+    supabase functions deploy update-connector-config --no-verify-jwt
+    supabase functions deploy disconnect-connector --no-verify-jwt
+
+    # History & Shared Intelligence
+    supabase functions deploy list-history --no-verify-jwt
+    supabase functions deploy get-briefing --no-verify-jwt
+    supabase functions deploy get-briefing-artifacts --no-verify-jwt
+    supabase functions deploy create-share-link --no-verify-jwt
+
+    # System Diagnostics
+    supabase functions deploy system-preflight --no-verify-jwt
+    supabase functions deploy connector-preflight --no-verify-jwt
+    supabase functions deploy seed-dummy-intel --no-verify-jwt
     ```
+
+## 🔐 Authentication Modes
+
+Silent Architect supports two primary authentication models:
+- **Supabase JWT**: Standard client-side authentication for browser sessions.
+- **Internal Key Mode**: Uses `x-internal-api-key` and `x-user-id` headers for high-speed service-to-service calls or administrative overrides. Enable this by setting `VITE_DEMO_AUTH_MODE=internal_key` in your frontend environment.
 
 ## 🛡️ Development & Mocking
 Silent Architect includes a robust **Mock Mode** for rapid UI iteration without API expenditure. Toggle the `Developer Mode` in the UI to swap between live production parity and local mock simulation.

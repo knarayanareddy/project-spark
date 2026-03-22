@@ -36,6 +36,7 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify({ 
       ok: true, 
       team: data.team,
+      bot: data.user, // Slack auth.test returns user name in 'user' field
       user_id: data.user_id
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
