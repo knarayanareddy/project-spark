@@ -5,9 +5,11 @@ import {
   getJobStatus, 
   setInternalApiKey, 
   assembleUserData, 
-  syncRequiredConnectors, 
+  syncRequiredConnectors,
+  getBriefing,
   type SegmentStatus 
 } from "@/lib/api";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { mockScriptJson } from "@/lib/mockData";
 import { 
@@ -24,10 +26,16 @@ import VideoStage from "@/components/today/VideoStage";
 import ActionPanel from "@/components/today/ActionPanel";
 import BriefControls from "@/components/today/BriefControls";
 import BriefEmptyState from "@/components/today/BriefEmptyState";
+import ShareDialog from "@/components/share/ShareDialog";
 
 type AppState = "idle" | "generating" | "script_ready" | "rendering" | "ready" | "playing";
 
 export default function Today() {
+  const [searchParams] = useSearchParams();
+  const urlScriptId = searchParams.get("script_id");
+  const urlJobId = searchParams.get("job_id");
+  const urlSeg = searchParams.get("seg");
+
   const { isDevMode } = useDevMode();
   const [appState, setAppState] = useState<AppState>("idle");
   const [useMock, setUseMock] = useState(true);
@@ -42,6 +50,7 @@ export default function Today() {
   const [apiKey, setApiKey] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const selectedProfileId = localStorage.getItem("selectedProfileId");
@@ -65,6 +74,73 @@ export default function Today() {
       setIsSyncing(false);
     }
   };
+
+  const startPolling = useCallback((jobIdToPoll: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await getJobStatus(jobIdToPoll);
+        setJobStatus(status.status);
+        setSegments(status.segments);
+        if (status.progress) setProgress(status.progress);
+        if (status.status === "complete" || status.status === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setAppState(status.status === "complete" ? "ready" : "script_ready");
+        }
+      } catch (e: any) {
+        addError("Polling error: " + e.message);
+      }
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    if (urlScriptId) {
+      setUseMock(false);
+      const loadBriefing = async () => {
+        try {
+          const res = await getBriefing(urlScriptId);
+          setScriptId(res.script.id);
+          setScriptJson(res.script.script_json);
+          
+          let activeJobId = urlJobId || res.latest_job?.id;
+
+          if (activeJobId) {
+            setJobId(activeJobId);
+            const status = await getJobStatus(activeJobId);
+            setJobStatus(status.status);
+            setSegments(status.segments);
+            if (status.progress) setProgress(status.progress);
+            
+            if (status.status === "queued" || status.status === "rendering") {
+              setAppState("rendering");
+              startPolling(activeJobId);
+            } else {
+              setAppState(status.status === "complete" ? "ready" : "script_ready");
+            }
+          } else {
+            const initialSegs: SegmentStatus[] = res.script.script_json.timeline_segments.map((t: any) => ({
+              segment_id: t.segment_id,
+              avatar_video_url: null, b_roll_image_url: null, ui_action_card: t.ui_action_card,
+              dialogue: t.dialogue, grounding_source_id: t.grounding_source_id,
+              status: "queued", error: null,
+            }));
+            setSegments(initialSegs);
+            setAppState("script_ready");
+          }
+
+          if (urlSeg) {
+             const requestedIdx = parseInt(urlSeg, 10);
+             if (!isNaN(requestedIdx)) {
+               setCurrentIdx(Math.min(requestedIdx, res.script.script_json.timeline_segments.length - 1));
+             }
+          }
+        } catch (err: any) {
+          addError("Failed to load briefing: " + err.message);
+        }
+      };
+      loadBriefing();
+    }
+  }, [urlScriptId, urlJobId, urlSeg, startPolling]);
 
   const handleGenerateScript = useCallback(async () => {
     setAppState("generating");
@@ -139,22 +215,7 @@ export default function Today() {
         const res = await startRender(scriptId);
         setJobId(res.job_id);
         setJobStatus("rendering");
-
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = setInterval(async () => {
-          try {
-            const status = await getJobStatus(res.job_id);
-            setJobStatus(status.status);
-            setSegments(status.segments);
-            if (status.progress) setProgress(status.progress);
-            if (status.status === "complete" || status.status === "failed") {
-              if (pollRef.current) clearInterval(pollRef.current);
-              setAppState(status.status === "complete" ? "ready" : "idle");
-            }
-          } catch (e: any) {
-            addError("Polling error: " + e.message);
-          }
-        }, 3000);
+        startPolling(res.job_id);
       }
     } catch (e: any) {
       addError(e.message);
@@ -236,6 +297,7 @@ export default function Today() {
           onPlay={handlePlay}
           onSync={handleSync}
           isSyncing={isSyncing}
+          onShare={() => setIsShareOpen(true)}
         />
       )}
 
@@ -259,6 +321,13 @@ export default function Today() {
            </div>
         </div>
       )}
+
+      <ShareDialog
+        isOpen={isShareOpen}
+        onClose={() => setIsShareOpen(false)}
+        scriptId={scriptId}
+        jobId={jobId}
+      />
     </div>
   );
 }

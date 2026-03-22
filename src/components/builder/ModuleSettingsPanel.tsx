@@ -4,6 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { AlertCircle, Save, Info, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+import ConfigModal from "@/components/connectors/ConfigModal";
 
 interface SettingsUi {
   type: "string_list" | "int" | "number" | "boolean" | "multiselect" | "text";
@@ -20,11 +23,13 @@ interface ModuleSettingsPanelProps {
     name: string;
     description: string;
     settingsUi?: Record<string, SettingsUi>;
+    requiredConnectors?: Array<{ provider: string }>;
   };
   settings: Record<string, any>;
   onUpdate: (key: string, value: any) => void;
   onSave: () => void;
   isSaving: boolean;
+  connectorStatus?: Record<string, string>;
 }
 
 export default function ModuleSettingsPanel({ 
@@ -32,8 +37,17 @@ export default function ModuleSettingsPanel({
   settings, 
   onUpdate, 
   onSave,
-  isSaving 
+  isSaving,
+  connectorStatus 
 }: ModuleSettingsPanelProps) {
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+
+  const handleOpenConfig = (provider: string) => {
+    setActiveProvider(provider);
+    setConfigModalOpen(true);
+  };
+
   if (!module) {
     return (
       <div className="flex flex-col h-full items-center justify-center p-8 text-center space-y-4 animate-pulse">
@@ -64,6 +78,39 @@ export default function ModuleSettingsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-8 space-y-8">
+        {module.requiredConnectors && module.requiredConnectors.length > 0 && (
+          <div className="space-y-4 mb-8">
+            <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground/50 mb-4">Intelligence Pipelines</h3>
+            <div className="grid gap-3">
+              {module.requiredConnectors.map((c: any) => {
+                const status = (connectorStatus || {})[c.provider] || "missing";
+                const isReady = status === "active";
+                return (
+                  <div key={c.provider} className="flex items-center justify-between p-4 rounded-xl bg-card/20 border border-border">
+                    <div className="flex items-center gap-3">
+                      <div className={cn("w-2 h-2 rounded-full", isReady ? "bg-green-500" : "bg-yellow-500")} />
+                      <div className="space-y-0.5">
+                        <p className="text-sm font-bold capitalize text-foreground">{c.provider}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                          {isReady ? "Connected & Ready" : "Configuration Required"}
+                        </p>
+                      </div>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="text-xs h-8"
+                      onClick={() => handleOpenConfig(c.provider)}
+                    >
+                      {isReady ? "Configure" : "Connect"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {!module.settingsUi || Object.keys(module.settingsUi).length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-border p-6">
             <Info className="w-8 h-8 text-muted-foreground/30" />
@@ -153,6 +200,13 @@ export default function ModuleSettingsPanel({
           </div>
         </div>
       </div>
+
+      <ConfigModal 
+        isOpen={configModalOpen} 
+        onClose={() => setConfigModalOpen(false)} 
+        title={`${(activeProvider || "").toUpperCase()} Integration`} 
+        provider={activeProvider} 
+      />
     </div>
   );
 }

@@ -1,24 +1,64 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { X, Check, Globe, Shield, Zap, RefreshCw, Layers } from "lucide-react";
+import { X, Check, Globe, Shield, Zap, RefreshCw, Layers, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { updateConnectorConfig } from "@/lib/api";
+import { updateConnectorConfig, getConnectorConfig, testConnector, triggerSync, disconnectConnector, startGoogleOAuth } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [config, setConfig] = useState<any>({});
+
+  useEffect(() => {
+    if (isOpen && provider) {
+      loadConfig();
+    }
+  }, [isOpen, provider]);
+
+  const loadConfig = async () => {
+    setIsLoading(true);
+    try {
+      const existingConfig = await getConnectorConfig(provider);
+      if (existingConfig) {
+        // Special case for RSS feeds which we display as newline string in textarea
+        if (provider === 'rss' && Array.isArray(existingConfig.feeds)) {
+          setConfig({
+            ...existingConfig,
+            feeds: existingConfig.feeds.map((f: any) => f.url).join('\n')
+          });
+        } else {
+          setConfig(existingConfig);
+        }
+      } else {
+        setConfig({});
+      }
+    } catch (err) {
+      console.error("Failed to load config", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   if (!isOpen) return null;
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await updateConnectorConfig(provider, config);
+      let finalConfig = { ...config };
+      
+      // Normalize RSS feeds
+      if (provider === 'rss' && typeof config.feeds === 'string') {
+        const urls = config.feeds.split('\n').map((l: string) => l.trim()).filter(Boolean);
+        finalConfig.feeds = urls.map((url: string) => ({ url, title: url }));
+      }
+
+      await updateConnectorConfig(provider, finalConfig);
       toast.success(`${title} configuration updated.`);
       onClose();
     } catch (err: any) {
@@ -28,15 +68,70 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
     }
   };
 
-  const handleTest = () => {
+  const handleTest = async () => {
     setIsTesting(true);
-    setTimeout(() => {
+    try {
+      let testCfg = { ...config };
+      if (provider === 'rss' && typeof config.feeds === 'string') {
+        const urls = config.feeds.split('\n').map((l: string) => l.trim()).filter(Boolean);
+        testCfg.feeds = urls.map((url: string) => ({ url }));
+      }
+      
+      const res = await testConnector(provider, testCfg);
+      if (res.ok) {
+        toast.success("Connection verified successfully: " + res.message);
+      } else {
+        toast.error("Connection failed: " + res.message);
+      }
+    } catch (err: any) {
+      toast.error("Test failed: " + err.message);
+    } finally {
       setIsTesting(false);
-      toast.success("Connection verified successfully.");
-    }, 1500);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await triggerSync(provider);
+      toast.success(`Sync triggered successfully. ${res.items_synced} items ingested.`);
+    } catch (err: any) {
+      toast.error("Sync failed: " + err.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm(`Are you sure you want to disconnect ${title}? This will stop all ingestions.`)) return;
+    try {
+      await disconnectConnector(provider);
+      toast.success(`${title} disconnected.`);
+      onClose();
+    } catch (err: any) {
+      toast.error("Disconnect failed: " + err.message);
+    }
+  };
+
+  const handleGoogleConnect = async () => {
+    try {
+      const res = await startGoogleOAuth(window.location.origin + "/oauth/google/callback");
+      if (res.url) window.location.href = res.url;
+    } catch (err: any) {
+      toast.error("Failed to start OAuth: " + err.message);
+    }
   };
 
   const renderFields = () => {
+    if (isLoading) {
+      return (
+        <div className="h-40 flex flex-col items-center justify-center space-y-3">
+          <Loader2 className="w-6 h-6 text-[#5789FF] animate-spin" />
+          <p className="text-[10px] font-black uppercase tracking-widest text-white/20">Retrieving Pipeline Config...</p>
+        </div>
+      );
+    }
+
     switch (provider) {
       case "github":
         return (
@@ -77,6 +172,15 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
       case "google":
         return (
           <div className="space-y-6">
+            <div className="p-4 bg-[#5789FF]/5 border border-[#5789FF]/20 rounded-xl flex items-center justify-between">
+              <div>
+                 <p className="text-sm font-bold text-white">Google Account Access</p>
+                 <p className="text-[10px] text-white/50">Required for Calendar & Gmail Sync</p>
+              </div>
+              <Button onClick={handleGoogleConnect} variant="outline" className="h-8 text-[10px] font-bold uppercase tracking-wider text-[#5789FF] border-[#5789FF]/30 hover:bg-[#5789FF]/10">
+                 Grant Access
+              </Button>
+            </div>
             <div className="space-y-3">
               <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Gmail Search Query</Label>
               <Input 
@@ -120,13 +224,35 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
       case "rss":
         return (
           <div className="space-y-3">
-            <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Feed URLs</Label>
+            <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Feed URLs (Enter URL per line)</Label>
             <textarea 
                className="sa-input-premium w-full !h-32 p-4 resize-none"
-               placeholder="Enter RSS URLs, one per line..."
+               placeholder="https://techcrunch.com/feed&#10;https://news.ycombinator.com/rss"
                value={config.feeds || ""}
                onChange={(e) => setConfig({ ...config, feeds: e.target.value })}
             />
+          </div>
+        );
+      case "weather":
+        return (
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">City, State or Country</Label>
+              <Input 
+                placeholder="e.g. San Francisco, CA"
+                value={config.location || ""}
+                onChange={(e) => setConfig({ ...config, location: e.target.value })}
+                className="sa-input-premium"
+              />
+              <p className="text-[10px] text-white/40">Our servers will automatically geocode this location for accurate local forecasting.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <ConfigToggle 
+                label="Fahrenheit" 
+                checked={config.units !== "celsius"} 
+                onChange={(val) => setConfig({ ...config, units: val ? "fahrenheit" : "celsius" })} 
+              />
+            </div>
           </div>
         );
       default:
@@ -148,9 +274,18 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
                 <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Endpoint Operational</span>
               </div>
             </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
-              <X className="w-5 h-5 text-white/40" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleDisconnect}
+                className="w-10 h-10 rounded-xl bg-rose-500/5 hover:bg-rose-500/10 flex items-center justify-center transition-colors group"
+                title="Disconnect Connector"
+              >
+                <Trash2 className="w-5 h-5 text-rose-500/40 group-hover:text-rose-500" />
+              </button>
+              <button onClick={onClose} className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+                <X className="w-5 h-5 text-white/40" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-8 min-h-[300px]">
@@ -159,23 +294,36 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
             <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl flex items-center gap-4 group">
               <div className={cn(
                 "w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center transition-colors",
-                isTesting ? "animate-spin" : "text-[#5789FF]"
+                isTesting || isSyncing ? "animate-spin" : "text-[#5789FF]"
               )}>
-                 <Shield className="w-5 h-5" />
+                 {isSyncing ? <RefreshCw className="w-5 h-5" /> : <Shield className="w-5 h-5" />}
               </div>
               <div className="flex-1">
-                 <span className="text-[9px] font-black uppercase tracking-widest text-white/30">Security Status</span>
-                 <p className="text-xs font-bold text-white/80">Oauth Scope: <span className="text-[#5789FF]">read_only_minimal</span></p>
+                 <span className="text-[9px] font-black uppercase tracking-widest text-white/30">Orchestration</span>
+                 <p className="text-xs font-bold text-white/80">
+                   {isSyncing ? "Ingesting active items..." : "Ready for validation"}
+                 </p>
               </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={handleTest}
-                disabled={isTesting}
-                className="text-[10px] uppercase font-black tracking-widest text-white/40 hover:text-white"
-              >
-                {isTesting ? "Testing..." : "Test Connection"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleSyncNow}
+                  disabled={isSyncing || isTesting || isSaving}
+                  className="text-[10px] uppercase font-black tracking-widest text-[#5789FF] hover:bg-[#5789FF]/10"
+                >
+                  {isSyncing ? "Syncing..." : "Sync Now"}
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleTest}
+                  disabled={isTesting || isSyncing || isSaving}
+                  className="text-[10px] uppercase font-black tracking-widest text-white/40 hover:text-white"
+                >
+                  {isTesting ? "Testing..." : "Test Connection"}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -183,7 +331,7 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
             <button onClick={onClose} className="text-[11px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors">Cancel</button>
             <Button 
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={isSaving || isSyncing || isTesting}
               className="sa-button-primary h-14 px-10 rounded-xl text-[11px] font-bold uppercase tracking-widest shadow-[0_10px_30px_rgba(87,137,255,0.3)]"
             >
               {isSaving ? "Saving Architecture..." : "Update Pipeline"}

@@ -1,4 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { listHistory, type HistoryItem } from "@/lib/api";
+import { format } from "date-fns";
 import { 
   Archive, 
   Share2, 
@@ -16,7 +19,8 @@ import {
   Sparkles,
   Link as LinkIcon,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Play
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -64,16 +68,36 @@ export default function YourBrief() {
   const [activeTab, setActiveTab] = useState("SUMMARY");
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  
+  const navigate = useNavigate();
+  const [latestBrief, setLatestBrief] = useState<HistoryItem | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listHistory(1).then(res => {
+      if (res.items.length > 0) setLatestBrief(res.items[0]);
+    }).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const handleAction = () => {
+    if (latestBrief) {
+      const sp = new URLSearchParams();
+      sp.set("script_id", latestBrief.id);
+      if (latestBrief.render_job?.id) sp.set("job_id", latestBrief.render_job.id);
+      navigate(`/today?${sp.toString()}`);
+    } else {
+      navigate('/today');
+    }
+  };
 
   const togglePlay = () => {
     if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play();
-      }
+      if (isPlaying) videoRef.current.pause();
+      else videoRef.current.play();
       setIsPlaying(!isPlaying);
     }
+    // Also trigger action on click of the player
+    handleAction();
   };
 
   return (
@@ -90,19 +114,19 @@ export default function YourBrief() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-5xl font-extrabold tracking-tighter text-white mb-2">
-              Q3 Tactical Infrastructure Overview
+              {loading ? "Loading..." : (latestBrief?.title || (latestBrief ? "Morning Briefing" : "Welcome to Project Spark"))}
             </h1>
             <p className="text-muted-foreground text-sm font-medium">
-              Synthesized briefing from 14 source nodes. Last updated 4m ago.
+              {loading ? "Fetching latest intel..." : (latestBrief ? `Generated ${format(new Date(latestBrief.created_at), "MMM d, h:mm a")}. Contains ${latestBrief.segments_count} segments.` : "No briefings yet. Time to generate your first.")}
             </p>
           </div>
           <div className="flex items-center gap-3">
-             <Button variant="outline" className="h-12 px-6 rounded-xl bg-white/5 border-white/10 hover:bg-white/10 text-white font-bold text-xs uppercase tracking-widest gap-2">
-               Archive Brief
-             </Button>
-             <Button className="sa-button-primary h-12 px-8 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center gap-2">
-               <Share2 className="w-4 h-4" />
-               Distribute
+             <Button 
+                onClick={handleAction}
+                className="sa-button-primary h-12 px-8 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center gap-2"
+              >
+               <Play className="w-4 h-4 fill-current" />
+               {latestBrief ? "Play Latest" : "Generate & Render"}
              </Button>
           </div>
         </div>

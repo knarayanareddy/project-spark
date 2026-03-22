@@ -40,9 +40,23 @@ export async function authorizeRequest(
   const masterPreviewKey = "hackathon_unlocked_preview_2024";
   if (internalKey && (config.INTERNAL_API_KEY || internalKey === masterPreviewKey)) {
     if (internalKey === config.INTERNAL_API_KEY || internalKey === masterPreviewKey) {
-      // For technical preview, we use a fixed user ID if not provided
-      const previewUserId = req.headers.get("x-preview-user-id") || "00000000-0000-0000-0000-000000000000";
-      return { ok: true, mode: "internal_key", user_id: previewUserId };
+      const xUserId = req.headers.get("x-user-id");
+      
+      if (xUserId) {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(xUserId)) {
+          return { ok: false, status: 400, body: { error: "Invalid x-user-id format" } };
+        }
+        return { ok: true, mode: "internal_key", user_id: xUserId };
+      }
+
+      const previewUserId = req.headers.get("x-preview-user-id");
+      if (previewUserId) {
+        return { ok: true, mode: "internal_key", user_id: previewUserId };
+      }
+
+      // Fallback for non-user-scoped endpoints
+      return { ok: true, mode: "internal_key" };
     }
   }
 

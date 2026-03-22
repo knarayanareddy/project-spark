@@ -62,8 +62,8 @@ serve(async (req: Request) => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${config.SUPABASE_SERVICE_ROLE_KEY}`,
-            "apikey": config.SUPABASE_SERVICE_ROLE_KEY!,
+            "x-internal-api-key": config.INTERNAL_API_KEY!,
+            "x-user-id": String(userId),
           },
           body: JSON.stringify({ profile_id: profile.id, mode: "best_effort" })
         });

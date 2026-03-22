@@ -29,6 +29,12 @@ serve(async (req) => {
     const jobId = url.searchParams.get("job_id");
     if (!jobId) throw new Error("job_id is required");
 
+    if (!auth.user_id) {
+      return new Response(JSON.stringify({ error: "Unauthorized: missing user context" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
     const supabase = createClient(
       config.SUPABASE_URL!,
       config.SUPABASE_SERVICE_ROLE_KEY!
@@ -38,9 +44,10 @@ serve(async (req) => {
       .from("render_jobs")
       .select("status, error")
       .eq("id", jobId)
+      .eq("user_id", auth.user_id)
       .single();
 
-    if (jobErr) throw jobErr;
+    if (jobErr) throw new Error("Job not found or access denied");
 
     const { data: segments, error: segErr } = await supabase
       .from("rendered_segments")

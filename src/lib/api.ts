@@ -28,7 +28,9 @@ async function callEdgeFunction<T>(
   if (session) {
     headers["Authorization"] = `Bearer ${session.access_token}`;
   } else if (demoAuthMode === "internal_key") {
-    headers["x-internal-api-key"] = internalApiKey;
+    // Fallback to internal key for technical preview
+    headers["x-internal-api-key"] = internalApiKey || "hackathon_unlocked_preview_2024";
+    headers["x-preview-user-id"] = "00000000-0000-0000-0000-000000000000";
   }
 
   const res = await fetch(url.toString(), {
@@ -171,6 +173,17 @@ export async function syncGithub() {
   return callEdgeFunction<{ ok: boolean; items_synced: number }>("sync-github", {});
 }
 
+export async function triggerSync(provider: string) {
+  const fnMap: Record<string, string> = {
+    rss: "sync-news",
+    github: "sync-github",
+    google: "sync-gmail",
+    slack: "sync-slack"
+  };
+  const fnName = fnMap[provider] || `sync-${provider}`;
+  return callEdgeFunction<{ ok: boolean; items_synced: number }>(fnName, {});
+}
+
 export async function syncRequiredConnectors(profileId: string, mode: "best_effort" | "force" = "best_effort") {
   return callEdgeFunction<{ profile_id: string; required_providers: string[]; results: any[] }>(
     "sync-required-connectors",
@@ -305,11 +318,131 @@ export async function getReadingList() {
 }
 
 export async function getConnectorStatus() {
-  return callEdgeFunction<any>("connector-status", { method: "GET" });
+  return callEdgeFunction<Array<{
+    provider: string;
+    status: string;
+    connected: boolean;
+    last_attempt_at: string | null;
+    last_success_at: string | null;
+    items_synced_last_run: number;
+    last_error_message: string | null;
+    last_run?: {
+      outcome: string;
+      finished_at: string | null;
+      items_upserted: number;
+    }
+  }>>("connector-status", { method: "GET" });
+}
+
+export async function testConnector(provider: string, config: any) {
+  return callEdgeFunction<{ ok: boolean; message: string }>("test-connector", {
+    body: { provider, config }
+  });
 }
 
 export async function updateConnectorConfig(type: string, config: any) {
   return callEdgeFunction<any>("update-connector-config", {
     body: { type, config }
+  });
+}
+
+export async function getConnectorConfig(provider: string) {
+  const { data, error } = await (supabase as any)
+    .from("connector_configs")
+    .select("config")
+    .eq("provider", provider)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.config || null;
+}
+
+export async function disconnectConnector(provider: string) {
+  return callEdgeFunction<any>("disconnect-connector", {
+    body: { provider }
+  });
+}
+
+export async function startGoogleOAuth(redirect_url: string) {
+  return callEdgeFunction<{url: string}>("google-oauth-start", {
+    method: "POST",
+    body: { redirect_url }
+  });
+}
+
+export async function completeGoogleOAuth(code: string, state: string) {
+  return callEdgeFunction<{ok: boolean}>("google-oauth-callback", {
+    method: "POST",
+    body: { code, state }
+  });
+}
+
+export interface HistoryItem {
+  id: string;
+  created_at: string;
+  persona: string;
+  profile_id: string | null;
+  profile_name: string | null;
+  trigger: string;
+  scheduled_for: string | null;
+  title: string | null;
+  segments_count: number;
+  render_job: {
+    id: string;
+    status: string;
+    updated_at: string;
+    error: string | null;
+  } | null;
+}
+
+export async function listHistory(limit = 50, offset = 0) {
+  return callEdgeFunction<{ items: HistoryItem[]; limit: number; offset: number }>("list-history", {
+    method: "GET",
+    params: { limit: limit.toString(), offset: offset.toString() },
+  });
+}
+
+export async function getBriefing(scriptId: string) {
+  return callEdgeFunction<{ 
+    script: any; 
+    latest_job: any; 
+  }>("get-briefing", {
+    method: "GET",
+    params: { script_id: scriptId },
+  });
+}
+
+export async function createShareLink(scriptId: string, jobId?: string | null, options?: { expires_in_hours?: number, scope?: string, allow_transcript?: boolean, allow_action_cards?: boolean }) {
+  return callEdgeFunction<{ share_id: string, token: string, share_url: string }>("create-share-link", {
+    body: { script_id: scriptId, job_id: jobId, ...options }
+  });
+}
+
+export interface ShareLink {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+  scope: string;
+  view_count: number;
+  last_viewed_at: string | null;
+  script_id: string;
+  job_id: string | null;
+  briefing_scripts: { title: string; segments_count: number } | null;
+}
+
+export async function listShareLinks() {
+  return callEdgeFunction<{ shares: ShareLink[] }>("list-share-links", { method: "POST" });
+}
+
+export async function revokeShareLink(shareId: string) {
+  return callEdgeFunction<{ status: string }>("revoke-share-link", {
+    body: { share_id: shareId }
+  });
+}
+
+export async function getSharedBriefing(token: string) {
+  return callEdgeFunction<{ share: any, script: any, render: any }>("get-shared-briefing", {
+    method: "GET",
+    params: { t: token }
   });
 }

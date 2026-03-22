@@ -97,50 +97,62 @@ export default function BriefingBuilder() {
       if (realProfs && realProfs.length > 0) profs = [...realProfs];
       catalog = realCatalog || [];
 
-      // 2. If no real profiles, and in Dev Mode (or as fallback), seed with mocks
-      if (profs.length === 0 && isDevModeEnabled()) {
+      // 2. If no real profiles, and authenticated, seed with real default profiles
+      if (profs.length === 0 && authenticated) {
+        try {
+          const SEED_PROFILES = [
+            { 
+              name: "Strategic CTO", 
+              enabled_modules: ["ai_news_delta", "github_prs", "inbox_triage"], 
+              module_settings: {},
+              persona: "Technical CTO",
+              frequency: "daily",
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            },
+            { 
+              name: "Product Innovation Lead", 
+              enabled_modules: ["ai_news_delta", "slack_updates"], 
+              module_settings: {},
+              persona: "Product Lead",
+              frequency: "twice_daily",
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            },
+            { 
+              name: "Security Auditor", 
+              enabled_modules: ["github_mentions", "watchlist_alerts"], 
+              module_settings: {},
+              persona: "Auditor",
+              frequency: "hourly",
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            },
+            { 
+              name: "Venture Partner", 
+              enabled_modules: ["hn_top", "linkedin_network"], 
+              module_settings: {},
+              persona: "Investor",
+              frequency: "manual",
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            }
+          ];
+          const newProfs = await Promise.all(SEED_PROFILES.map(p => upsertProfile(p)));
+          profs = newProfs;
+          toast.success("Initialized default intelligence profiles.");
+        } catch (err: any) {
+          console.error("Failed to seed profiles", err);
+        }
+      }
+
+      // 3. Fallback to mocks ONLY if unauthenticated Dev Mode
+      if (profs.length === 0 && isDevModeEnabled() && !authenticated) {
         profs = [
           { 
             id: "mock-1", 
-            name: "Strategic CTO", 
+            name: "Strategic CTO (Mock)", 
             description: "Infrastructure oversight, AI benchmarks, and critical security vulnerabilities.",
-            enabled_modules: ["rss", "github_prs", "inbox_triage"], 
+            enabled_modules: ["ai_news_delta", "github_prs", "inbox_triage"], 
             module_settings: {},
             persona: "Technical CTO",
             frequency: "daily",
-            timezone: "UTC",
-            updated_at: new Date().toISOString()
-          },
-          { 
-            id: "mock-2", 
-            name: "Product Innovation Lead", 
-            description: "Market shifts, competitor releases, and emerging consumer signals.",
-            enabled_modules: ["ai_news_delta", "slack_updates"], 
-            module_settings: {},
-            persona: "Product Lead",
-            frequency: "twice_daily",
-            timezone: "UTC",
-            updated_at: new Date().toISOString()
-          },
-          { 
-            id: "mock-3", 
-            name: "Security Auditor", 
-            description: "Zero-day alerts, dependency vulnerabilities, and compliance drift.",
-            enabled_modules: ["github_mentions", "watchlist_alerts"], 
-            module_settings: {},
-            persona: "Auditor",
-            frequency: "hourly",
-            timezone: "UTC",
-            updated_at: new Date().toISOString()
-          },
-          { 
-            id: "mock-4", 
-            name: "Venture Partner", 
-            description: "Funding rounds, tech acquisitions, and talent migration patterns.",
-            enabled_modules: ["hn_top", "linkedin_network"], 
-            module_settings: {},
-            persona: "Investor",
-            frequency: "manual",
             timezone: "UTC",
             updated_at: new Date().toISOString()
           }
@@ -206,6 +218,71 @@ export default function BriefingBuilder() {
     }
   };
 
+  const handleCreateProfile = async () => {
+    setIsSaving(true);
+    try {
+      const newProf = await upsertProfile({
+        name: "New Profile",
+        enabled_modules: [],
+        module_settings: {},
+        frequency: "manual",
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      });
+      setProfiles(prev => [...prev, newProf]);
+      handleProfileSelect(newProf.id, [...profiles, newProf]);
+      toast.success("Profile created");
+    } catch (err: any) {
+      toast.error("Failed to create profile: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteProfile = async () => {
+    if (!selectedProfileId || selectedProfileId.startsWith("mock-")) return;
+    setIsSaving(true);
+    try {
+      // Import deleteProfile at the top automatically assumes it's available or we'll add it
+      const { deleteProfile } = await import('@/lib/api');
+      await deleteProfile(selectedProfileId);
+      const nextProfs = profiles.filter(p => p.id !== selectedProfileId);
+      setProfiles(nextProfs);
+      if (nextProfs.length > 0) handleProfileSelect(nextProfs[0].id, nextProfs);
+      else {
+        setSelectedProfileId(null);
+        setProfileName("");
+      }
+      toast.success("Profile deleted");
+    } catch (err: any) {
+      toast.error("Failed to delete profile: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDuplicateProfile = async () => {
+    const current = profiles.find(p => p.id === selectedProfileId);
+    if (!current) return;
+    setIsSaving(true);
+    try {
+      const newProf = await upsertProfile({
+        name: `${current.name} (Copy)`,
+        persona: current.persona,
+        enabled_modules: current.enabled_modules,
+        module_settings: current.module_settings,
+        frequency: current.frequency,
+        timezone: current.timezone
+      });
+      setProfiles(prev => [...prev, newProf]);
+      handleProfileSelect(newProf.id, [...profiles, newProf]);
+      toast.success("Profile duplicated");
+    } catch (err: any) {
+      toast.error("Failed to duplicate profile: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleLoginWithEmail = async () => {
     if (!loginEmail) return;
     setIsSendingMagicLink(true);
@@ -255,7 +332,14 @@ export default function BriefingBuilder() {
       {/* COLUMN 1: Profiles & Frequency */}
       <div className="col-span-3 space-y-10">
         <section className="space-y-6">
-          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-white/40">Executive Profile</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-white/40">Executive Profile</h3>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-white/40 hover:text-white" onClick={handleCreateProfile} title="Create Profile">
+                <Plus className="w-3 h-3" />
+              </Button>
+            </div>
+          </div>
           <div className="space-y-4">
             {profiles.map(p => (
               <ProfileCard 
@@ -267,6 +351,12 @@ export default function BriefingBuilder() {
               />
             ))}
           </div>
+          {selectedProfileId && !selectedProfileId.startsWith("mock-") && (
+            <div className="flex items-center gap-2 pt-2 border-t border-white/5 justify-end">
+              <Button variant="ghost" size="sm" className="text-xs text-white/40 hover:text-white h-7 px-2" onClick={handleDuplicateProfile} disabled={isSaving}>Duplicate</Button>
+              <Button variant="ghost" size="sm" className="text-xs text-red-500/60 hover:text-red-500 hover:bg-red-500/10 h-7 px-2" onClick={handleDeleteProfile} disabled={isSaving}>Delete</Button>
+            </div>
+          )}
         </section>
 
         <section className="space-y-6">
@@ -287,11 +377,11 @@ export default function BriefingBuilder() {
                 As-it-Happens
               </Button>
              <Button 
-                variant={frequency === "weekly" ? "default" : "outline"} 
-                onClick={() => handleUpdateProfile({ frequency: "weekly" })}
-                className={cn("h-14 rounded-xl font-bold text-[10px] uppercase tracking-widest", frequency === "weekly" ? "sa-button-primary" : "bg-white/[0.02] border-white/5 hover:bg-white/5 text-white/60")}
+                variant={frequency === "twice_daily" ? "default" : "outline"} 
+                onClick={() => handleUpdateProfile({ frequency: "twice_daily" })}
+                className={cn("h-14 rounded-xl font-bold text-[10px] uppercase tracking-widest", frequency === "twice_daily" ? "sa-button-primary" : "bg-white/[0.02] border-white/5 hover:bg-white/5 text-white/60")}
               >
-                Weekly Recap
+                Twice Daily
               </Button>
              <Button 
                 variant={frequency === "manual" ? "default" : "outline"} 
@@ -339,6 +429,7 @@ export default function BriefingBuilder() {
               <ModuleSettingsPanel 
                  module={moduleCatalog.find(m => m.id === selectedModuleId)}
                  settings={moduleSettings[selectedModuleId] || {}}
+                 connectorStatus={connectorStatus}
                  onUpdate={(key, val) => {
                     const nextSettings = {
                        ...moduleSettings,

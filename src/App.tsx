@@ -15,6 +15,7 @@ import History from "./pages/History.tsx";
 import Settings from "./pages/Settings.tsx";
 import YourBrief from "./pages/YourBrief.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import SharedBrief from "./pages/SharedBrief.tsx";
 
 import { useDevMode } from "@/lib/devMode";
 import { useEffect, useState } from "react";
@@ -54,6 +55,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/auth" element={<Auth />} />
+          <Route path="/share/:token" element={<SharedBrief />} />
           <Route element={<RequireAuth><AppShell /></RequireAuth>}>
             <Route path="/" element={<Navigate to="/brief" replace />} />
             <Route path="/brief" element={<YourBrief />} />

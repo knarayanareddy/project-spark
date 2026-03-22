@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle, onSelect }: any) => (
+const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle, onSelect, hasRequired, isReady }: any) => (
   <div 
     onClick={onSelect}
     className={cn(
@@ -36,15 +36,10 @@ const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle
       <div className="flex-1 space-y-1">
         <div className="flex items-center justify-between">
           <h4 className="font-bold text-lg text-white">{title}</h4>
-          {title === "Technical RSS Feeds" && (
-            <Badge className="bg-[#5789FF]/10 text-[#5789FF] border-none text-[10px] px-2 py-0 h-5 flex items-center gap-1">
-              4 ACTIVE
+          {hasRequired && (
+            <Badge className={cn("text-[9px] px-2 py-0.5 h-5 border font-bold uppercase tracking-wider", isReady ? "bg-green-500/10 text-green-500 border-green-500/20" : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20")}>
+              {isReady ? "Ready" : "Needs Connection"}
             </Badge>
-          )}
-          {title === "GitHub Repository Tracking" && (
-            <button className="text-[9px] font-black uppercase tracking-tighter text-white/40 hover:text-white flex items-center gap-1 border border-white/10 px-2 py-1 rounded-md bg-white/5">
-              <Plus className="w-2 h-2" /> ADD REPO
-            </button>
           )}
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
@@ -110,6 +105,9 @@ export default function ModuleList({
           if (mod.id.includes("github")) Icon = Github;
           if (mod.id.includes("mail") || mod.id.includes("gmail") || mod.id.includes("inbox")) Icon = Mail;
           
+          const hasRequired = mod.requiredConnectors && mod.requiredConnectors.length > 0;
+          const isReady = hasRequired ? mod.requiredConnectors.every((c: any) => connectorStatus[c.provider] === "active") : true;
+
           return (
             <SourceCard 
               key={mod.id}
@@ -120,6 +118,8 @@ export default function ModuleList({
               active={enabledModuleIds.includes(mod.id)}
               onSelect={() => onSelect(mod.id)}
               onToggle={() => onToggle(mod.id)}
+              hasRequired={hasRequired}
+              isReady={isReady}
             />
           );
         })}

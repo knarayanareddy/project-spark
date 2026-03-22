@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Loader2, Zap, Clapperboard, RefreshCw, Play, SkipForward, LayoutGrid } from "lucide-react";
+import { Loader2, Zap, Clapperboard, RefreshCw, Play, SkipForward, LayoutGrid, Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface BriefControlsProps {
@@ -9,6 +9,7 @@ interface BriefControlsProps {
   onPlay: () => void;
   onSync: () => void;
   isSyncing: boolean;
+  onShare?: () => void;
 }
 
 export default function BriefControls({ 
@@ -17,7 +18,8 @@ export default function BriefControls({
   onRender, 
   onPlay, 
   onSync,
-  isSyncing
+  isSyncing,
+  onShare
 }: BriefControlsProps) {
   const isGenerating = state === "generating";
   const isRendering = state === "rendering";
@@ -73,13 +75,23 @@ export default function BriefControls({
         </Button>
 
         {state === "ready" && (
-          <Button 
-            onClick={onPlay} 
-            className="h-14 px-10 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.2)]"
-          >
-            <Play className="w-5 h-5 mr-3 fill-current" />
-            Engage Neural Stream
-          </Button>
+          <>
+            <Button 
+               onClick={onShare}
+               variant="outline"
+               className="h-14 px-6 bg-white/[0.03] border-white/10 hover:bg-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest gap-3"
+            >
+              <Share2 className="w-4 h-4 text-[#5789FF]" />
+              Share
+            </Button>
+            <Button 
+              onClick={onPlay} 
+              className="h-14 px-10 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-[0_10px_30px_rgba(16,185,129,0.2)]"
+            >
+              <Play className="w-5 h-5 mr-3 fill-current" />
+              Engage Neural Stream
+            </Button>
+          </>
         )}
       </div>
 
