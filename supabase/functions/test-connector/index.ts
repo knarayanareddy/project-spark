@@ -3,6 +3,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Parser from "https://esm.sh/rss-parser@3.13.0";
 import { config, validateConfig } from "../_shared/config.ts";
 import { authorizeRequest } from "../_shared/auth.ts";
+import { getConnectorSecretDecrypted } from "../_shared/connectors.ts";
+import { initOrUpsertHealthOnConnect } from "../_shared/connectorHealth.ts";
 
 validateConfig();
 const parser = new Parser();
@@ -22,6 +24,7 @@ serve(async (req: Request) => {
   }
 
   const userId = auth.user_id!;
+  const supabase = createClient(config.SUPABASE_URL!, config.SUPABASE_SERVICE_ROLE_KEY!);
   const { provider, config: connectorConfig } = await req.json();
 
   try {
@@ -36,7 +39,60 @@ serve(async (req: Request) => {
       const xml = await res.text();
       await parser.parseString(xml); // Validate XML parse
       
+      await initOrUpsertHealthOnConnect(supabase, { userId, provider, connected: true, status: 'active' });
+
       return new Response(JSON.stringify({ ok: true, message: `Successfully parsed ${feeds.length} feed(s).` }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (provider === "github") {
+      const secrets = await getConnectorSecretDecrypted(supabase, userId, provider);
+      if (!secrets?.pat) throw new Error("Missing GitHub Personal Access Token.");
+
+      const res = await fetch("https://api.github.com/user", {
+        headers: {
+          "Authorization": `Bearer ${secrets.pat}`,
+          "Accept": "application/vnd.github.v3+json",
+          "User-Agent": "Morning-Briefing-Bot/1.0"
+        }
+      });
+      
+      if (!res.ok) throw new Error(`GitHub validation failed: ${res.status} ${res.statusText}`);
+      const data = await res.json();
+      
+      await initOrUpsertHealthOnConnect(supabase, { userId, provider, connected: true, status: 'active' });
+
+      return new Response(JSON.stringify({ ok: true, message: `Connected as ${data.login}` }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (provider === "weather") {
+      const location = connectorConfig.location || "auto-IP/Default";
+      await initOrUpsertHealthOnConnect(supabase, { userId, provider, connected: true, status: 'active' });
+      return new Response(JSON.stringify({ ok: true, message: `Weather tracking activated for: ${location}` }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (provider === "slack") {
+      const secrets = await getConnectorSecretDecrypted(supabase, userId, provider);
+      if (!secrets?.bot_token) throw new Error("Missing Slack Bot Token.");
+
+      const res = await fetch("https://slack.com/api/auth.test", {
+        headers: {
+          "Authorization": `Bearer ${secrets.bot_token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      
+      const data = await res.json();
+      if (!data.ok) throw new Error(`Slack validation failed: ${data.error}`);
+      
+      await initOrUpsertHealthOnConnect(supabase, { userId, provider, connected: true, status: 'active' });
+
+      return new Response(JSON.stringify({ ok: true, message: `Connected to workspace ${data.team} as ${data.user}` }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
@@ -47,6 +103,9 @@ serve(async (req: Request) => {
     });
 
   } catch (e: any) {
+    if (provider) {
+       await initOrUpsertHealthOnConnect(supabase, { userId, provider, connected: false, status: 'error' }).catch(() => {});
+    }
     return new Response(JSON.stringify({ ok: false, message: e.message }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });

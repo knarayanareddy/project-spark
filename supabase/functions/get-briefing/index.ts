@@ -38,7 +38,7 @@ serve(async (req: Request) => {
 
     const { data: script, error: scriptErr } = await supabase
       .from("briefing_scripts")
-      .select("id, created_at, persona, profile_id, trigger, scheduled_for, script_json")
+      .select("id, created_at, persona, profile_id, trigger, scheduled_for, script_json, plan_hash")
       .eq("id", scriptId)
       .eq("user_id", userId)
       .single();

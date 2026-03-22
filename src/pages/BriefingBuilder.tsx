@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { getProfiles, upsertProfile, getModuleCatalog, previewPlan } from "@/lib/api";
+import { getProfiles, upsertProfile, getModuleCatalog, previewPlan, getConnectorStatus } from "@/lib/api";
 import { toast } from "sonner";
 import { Plus, Settings, Rocket, Database, Activity, Clock, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,10 +33,42 @@ export default function BriefingBuilder() {
   const [loginEmail, setLoginEmail] = useState("");
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
 
+  const fetchTargetConnectors = async () => {
+    try {
+      const cStatus = await getConnectorStatus();
+      if (cStatus && Array.isArray(cStatus)) {
+        setConnectorStatus(
+          cStatus.reduce((acc: any, curr: any) => ({ ...acc, [curr.provider]: curr.status }), {})
+        );
+      }
+    } catch (e) {
+      console.error("Failed to fetch connector status", e);
+    }
+  };
+
   const handlePreview = async () => {
     if (!selectedProfileId) return;
     setIsPreviewLoading(true);
+
     try {
+      const missingConnectors = new Set<string>();
+      enabledModuleIds.forEach(modId => {
+        const mod = moduleCatalog.find(m => m.id === modId);
+        if (mod?.requiredConnectors) {
+          mod.requiredConnectors.forEach((c: any) => {
+            if (connectorStatus[c.provider] !== "active") {
+              missingConnectors.add(c.provider);
+            }
+          });
+        }
+      });
+      
+      if (missingConnectors.size > 0) {
+        toast.error(`Connect missing source(s) first: ${Array.from(missingConnectors).join(", ")}`);
+        setIsPreviewLoading(false);
+        return;
+      }
+
       const res = await previewPlan(selectedProfileId);
       setPreviewResult(res);
       if (res.connector_status) {
@@ -94,6 +126,7 @@ export default function BriefingBuilder() {
         getProfiles().catch(() => []), 
         getModuleCatalog().catch(() => [])
       ]);
+      await fetchTargetConnectors();
       
       if (realProfs && realProfs.length > 0) profs = [...realProfs];
       catalog = realCatalog || [];
@@ -443,6 +476,7 @@ export default function BriefingBuilder() {
                  }}
                  onSave={() => handleUpdateProfile({})}
                  isSaving={isSaving}
+                 onConfigClose={fetchTargetConnectors}
               />
            </div>
         )}

@@ -31,9 +31,10 @@ serve(async (req: Request) => {
     const url = new URL(req.url);
     const limit = parseInt(url.searchParams.get("limit") || "50");
     const offset = parseInt(url.searchParams.get("offset") || "0");
+    const includeArchived = url.searchParams.get("include_archived") === "true";
 
     // Fetch brief scripts, joined with profile and their latest render job
-    const { data: scripts, error } = await supabase
+    let query = supabase
       .from("briefing_scripts")
       .select(`
         id,
@@ -44,6 +45,7 @@ serve(async (req: Request) => {
         scheduled_for,
         title,
         script_json,
+        archived,
         briefing_profiles ( name ),
         render_jobs ( id, status, updated_at, error )
       `)
@@ -51,6 +53,12 @@ serve(async (req: Request) => {
       .order("created_at", { ascending: false })
       .limit(limit)
       .range(offset, offset + limit - 1);
+
+    if (!includeArchived) {
+      query = query.eq("archived", false);
+    }
+
+    const { data: scripts, error } = await query;
 
     if (error) throw error;
 
@@ -71,6 +79,7 @@ serve(async (req: Request) => {
         trigger: script.trigger,
         scheduled_for: script.scheduled_for,
         title: script.title,
+        archived: !!script.archived,
         segments_count: Array.isArray(script.script_json?.timeline_segments) 
           ? script.script_json.timeline_segments.length 
           : 0,

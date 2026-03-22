@@ -16,10 +16,13 @@ interface ConnectorCardProps {
   icon: React.ElementType;
   title: string;
   description: string;
-  status: 'healthy' | 'warning' | 'error';
+  status: 'healthy' | 'warning' | 'error' | 'disabled';
   statusLabel: string;
   stats: { label: string; value: string }[];
-  onConfigure: () => void;
+  onConfigure?: () => void;
+  onTest?: () => void;
+  onSync?: () => void;
+  onDisconnect?: () => void;
   iconBg?: string;
 }
 
@@ -31,19 +34,24 @@ export default function ConnectorCard({
   statusLabel, 
   stats, 
   onConfigure,
+  onTest,
+  onSync,
+  onDisconnect,
   iconBg = "bg-white/5"
 }: ConnectorCardProps) {
   
   const statusColors = {
     healthy: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
     warning: "text-amber-400 bg-amber-400/10 border-amber-400/20",
-    error: "text-rose-400 bg-rose-400/10 border-rose-400/20"
+    error: "text-rose-400 bg-rose-400/10 border-rose-400/20",
+    disabled: "text-gray-400 bg-gray-400/10 border-gray-400/20"
   };
 
   const statusDot = {
     healthy: "bg-emerald-400",
     warning: "bg-amber-400",
-    error: "bg-rose-400"
+    error: "bg-rose-400",
+    disabled: "bg-gray-400"
   };
 
   return (
@@ -77,20 +85,30 @@ export default function ConnectorCard({
       </div>
 
       {/* Actions */}
-      <div className="mt-auto flex items-center gap-3">
+      <div className="mt-auto pt-4 flex items-center justify-between gap-2 flex-wrap pb-2 border-t border-white/5">
         <Button 
           onClick={onConfigure}
+          disabled={status === 'disabled' || !onConfigure}
           variant="outline" 
-          className="flex-1 h-12 bg-white/[0.03] border-white/5 hover:bg-white/10 hover:border-white/10 text-white font-bold uppercase tracking-widest text-[10px] rounded-xl transition-all"
+          className="flex-1 h-9 bg-white/[0.03] border-white/5 hover:bg-white/10 hover:border-white/10 text-white font-bold uppercase tracking-widest text-[9px] rounded-lg transition-all"
         >
-          {status === 'error' ? 'Re-authenticate' : 'Configure'}
+          {status === 'error' ? 'Re-Auth' : 'Config'}
         </Button>
         <Button 
+          onClick={onTest}
+          disabled={status === 'disabled' || !onTest}
           variant="outline" 
-          size="icon" 
-          className="w-12 h-12 bg-white/[0.03] border-white/5 hover:bg-white/10 rounded-xl"
+          className="flex-1 h-9 bg-white/[0.03] border-white/5 hover:bg-white/10 hover:border-white/10 text-white font-bold uppercase tracking-widest text-[9px] rounded-lg transition-all"
         >
-          {status === 'healthy' ? <MoreVertical className="w-4 h-4 text-white/40" /> : <Settings2 className="w-4 h-4 text-white/40" />}
+          Test
+        </Button>
+        <Button 
+          onClick={onSync}
+          disabled={status === 'disabled' || !onSync || status === 'warning'}
+          variant="outline" 
+          className="flex-1 h-9 bg-[#5789FF]/10 text-[#5789FF] hover:bg-[#5789FF]/20 border-transparent font-bold uppercase tracking-widest text-[9px] rounded-lg"
+        >
+          Sync
         </Button>
       </div>
     </div>

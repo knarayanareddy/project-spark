@@ -5,7 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { updateConnectorConfig, getConnectorConfig, testConnector, triggerSync, disconnectConnector, startGoogleOAuth } from "@/lib/api";
+import FeedManagementModal from "./FeedManagementModal";
+import { 
+  updateConnectorConfig, 
+  setConnectorSecret, 
+  getConnectorConfig, 
+  triggerSync, 
+  disconnectConnector, 
+  startGoogleOAuth,
+  testRssSync,
+  testGitHubSync,
+  testSlackSync
+} from "@/lib/api";
 import { toast } from "sonner";
 
 export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
@@ -13,25 +24,24 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
   const [isTesting, setIsTesting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFeedModalOpen, setIsFeedModalOpen] = useState(false);
   const [config, setConfig] = useState<any>({});
+  const [secret, setSecret] = useState<string>("");
 
   const loadConfig = useCallback(async () => {
     setIsLoading(true);
     try {
       const existingConfig = await getConnectorConfig(provider);
       if (existingConfig) {
-        // Special case for RSS feeds which we display as newline string in textarea
-        if (provider === 'rss' && Array.isArray(existingConfig.feeds)) {
-          setConfig({
-            ...existingConfig,
-            feeds: existingConfig.feeds.map((f: any) => f.url).join('\n')
-          });
+        if (provider === 'rss' && !Array.isArray(existingConfig.feeds)) {
+          setConfig({ ...existingConfig, feeds: [] });
         } else {
           setConfig(existingConfig);
         }
       } else {
         setConfig({});
       }
+      setSecret(""); // Reset secret field on load (write-only)
     } catch (err) {
       console.error("Failed to load config", err);
     } finally {
@@ -52,13 +62,21 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
     try {
       const finalConfig = { ...config };
       
-      // Normalize RSS feeds
-      if (provider === 'rss' && typeof config.feeds === 'string') {
-        const urls = config.feeds.split('\n').map((l: string) => l.trim()).filter(Boolean);
-        finalConfig.feeds = urls.map((url: string) => ({ url, title: url }));
+      // Ensure RSS feeds are an array
+      if (provider === 'rss' && !Array.isArray(finalConfig.feeds)) {
+        finalConfig.feeds = [];
       }
 
       await updateConnectorConfig(provider, finalConfig);
+      
+      if (secret) {
+        if (provider === 'github') {
+          await setConnectorSecret(provider, { pat: secret });
+        } else if (provider === 'slack') {
+          await setConnectorSecret(provider, { bot_token: secret });
+        }
+      }
+
       toast.success(`${title} configuration updated.`);
       onClose();
     } catch (err: any) {
@@ -71,17 +89,27 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
   const handleTest = async () => {
     setIsTesting(true);
     try {
-      const testCfg = { ...config };
-      if (provider === 'rss' && typeof config.feeds === 'string') {
-        const urls = config.feeds.split('\n').map((l: string) => l.trim()).filter(Boolean);
-        testCfg.feeds = urls.map((url: string) => ({ url }));
-      }
-      
-      const res = await testConnector(provider, testCfg);
-      if (res.ok) {
-        toast.success("Connection verified successfully: " + res.message);
+      let res: any;
+      if (provider === 'rss') {
+        const feeds = config.feeds || [];
+        if (feeds.length === 0) throw new Error("Add at least one feed to test.");
+        res = await testRssSync(feeds[0].url);
+        if (res.ok) toast.success(`Validated ${feeds[0].title || 'Feed'}: ${res.itemCount} items found.`);
+      } else if (provider === 'github') {
+        if (!secret) throw new Error("Enter a PAT to test.");
+        res = await testGitHubSync(secret);
+        if (res.ok) toast.success(`GitHub Verified: Connected as ${res.username}. Scopes: ${res.scopes || 'none'}`);
+      } else if (provider === 'slack') {
+        if (!secret) throw new Error("Enter a Bot Token to test.");
+        res = await testSlackSync(secret);
+        if (res.ok) toast.success(`Slack Verified: Connected as ${res.bot} in ${res.team}`);
       } else {
-        toast.error("Connection failed: " + res.message);
+        toast.info(`Pre-configured validation not yet available for ${provider}. Use Sync Now to verify.`);
+        return;
+      }
+
+      if (res && !res.ok) {
+        toast.error("Validation failed: " + (res.error || "Unknown error"));
       }
     } catch (err: any) {
       toast.error("Test failed: " + err.message);
@@ -136,6 +164,17 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
       case "github":
         return (
           <div className="space-y-6">
+            <div className="space-y-3">
+              <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Personal Access Token</Label>
+              <Input 
+                type="password"
+                placeholder="ghp_****************"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                className="sa-input-premium font-mono"
+              />
+              <p className="text-[9px] text-white/30 uppercase tracking-widest">Leave blank to keep existing token. Requires repo scopes.</p>
+            </div>
             <div className="space-y-3">
               <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Target Repositories</Label>
               <Input 
@@ -205,6 +244,17 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
         return (
           <div className="space-y-6">
             <div className="space-y-3">
+              <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Slack Bot Token</Label>
+              <Input 
+                type="password"
+                placeholder="xoxb-****************"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                className="sa-input-premium font-mono"
+              />
+              <p className="text-[9px] text-white/30 uppercase tracking-widest">Leave blank to keep existing token.</p>
+            </div>
+            <div className="space-y-3">
               <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Monitored Channels</Label>
               <Input 
                 placeholder="#general, #dev-alerts..."
@@ -221,18 +271,48 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
             />
           </div>
         );
-      case "rss":
+      case "rss": {
+        const currentFeeds = Array.isArray(config.feeds) ? config.feeds : [];
+        const seedDefaultFeeds = () => {
+          const defaults = [
+            { url: "https://techcrunch.com/feed/", title: "TechCrunch" },
+            { url: "https://news.ycombinator.com/rss", title: "Hacker News" },
+            { url: "https://www.theverge.com/rss/index.xml", title: "The Verge" },
+            { url: "https://wired.com/feed/rss", title: "Wired" },
+            { url: "https://arstechnica.com/feed/", title: "Ars Technica" },
+            { url: "https://feeds.bloomberg.com/technology/news.rss", title: "Bloomberg Tech" },
+            { url: "https://www.cnbc.com/id/19854910/device/rss/rss.html", title: "CNBC Tech" },
+            { url: "https://dev.to/feed", title: "DEV Community" },
+            { url: "https://github.blog/feed/", title: "GitHub Blog" },
+            { url: "https://aws.amazon.com/blogs/aws/feed/", title: "AWS Blog" }
+          ];
+          setConfig({ ...config, feeds: [...currentFeeds, ...defaults] });
+          toast.success("Seeded 10 global tech feeds.");
+        };
+        
         return (
-          <div className="space-y-3">
-            <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Feed URLs (Enter URL per line)</Label>
-            <textarea 
-               className="sa-input-premium w-full !h-32 p-4 resize-none"
-               placeholder="https://techcrunch.com/feed&#10;https://news.ycombinator.com/rss"
-               value={config.feeds || ""}
-               onChange={(e) => setConfig({ ...config, feeds: e.target.value })}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 bg-black/20 border border-white/5 rounded-xl">
+              <div className="space-y-1">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-white/40">Configured Feeds</Label>
+                <p className="text-sm font-bold text-white">{currentFeeds.length} Active Target(s)</p>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={seedDefaultFeeds} variant="outline" size="sm" className="h-8 text-[10px] font-bold text-emerald-400 border-emerald-400/20 hover:bg-emerald-400/10">Seed Defaults</Button>
+                <Button onClick={() => setIsFeedModalOpen(true)} variant="outline" size="sm" className="h-8 text-[10px] font-bold text-[#5789FF] border-[#5789FF]/30 hover:bg-[#5789FF]/10">Manage Feeds</Button>
+              </div>
+            </div>
+            
+            <FeedManagementModal 
+              isOpen={isFeedModalOpen} 
+              onClose={() => setIsFeedModalOpen(false)} 
+              feeds={currentFeeds} 
+              onSave={(updated) => { setConfig({ ...config, feeds: updated }); setIsFeedModalOpen(false); }} 
+              isSaving={false} 
             />
           </div>
         );
+      }
       case "weather":
         return (
           <div className="space-y-6">

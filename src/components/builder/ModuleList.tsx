@@ -12,18 +12,22 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle, onSelect, hasRequired, isReady }: any) => (
+const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle, onSelect, hasRequired, isReady, availability }: any) => {
+  const isComingSoon = availability === "coming_soon";
+  
+  return (
   <div 
-    onClick={onSelect}
+    onClick={isComingSoon ? undefined : onSelect}
     className={cn(
-      "p-6 rounded-2xl transition-all duration-300 border cursor-pointer relative group overflow-hidden",
-      selected 
+      "p-6 rounded-2xl transition-all duration-300 border relative group overflow-hidden",
+      isComingSoon ? "opacity-50 cursor-not-allowed bg-black/20 border-white/5" : "cursor-pointer",
+      selected && !isComingSoon
         ? "bg-[#111928] border-[#5789FF]/30 shadow-[0_0_30px_rgba(87,137,255,0.1)]" 
-        : "bg-white/[0.02] border-white/5 hover:border-white/10"
+        : (!isComingSoon ? "bg-white/[0.02] border-white/5 hover:border-white/10" : "")
     )}
   >
     {/* Highlight for active selected state */}
-    {selected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#5789FF]" />}
+    {selected && !isComingSoon && <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#5789FF]" />}
 
     <div className="flex items-start gap-5">
       <div className={cn(
@@ -36,14 +40,32 @@ const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle
       <div className="flex-1 space-y-1">
         <div className="flex items-center justify-between">
           <h4 className="font-bold text-lg text-white">{title}</h4>
-          {hasRequired && (
+          {isComingSoon ? (
+            <Badge className="text-[9px] px-2 py-0.5 h-5 border font-bold uppercase tracking-wider bg-white/5 text-white/40 border-white/10">
+              Coming Soon
+            </Badge>
+          ) : hasRequired ? (
             <Badge className={cn("text-[9px] px-2 py-0.5 h-5 border font-bold uppercase tracking-wider", isReady ? "bg-green-500/10 text-green-500 border-green-500/20" : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20")}>
               {isReady ? "Ready" : "Needs Connection"}
             </Badge>
-          )}
+          ) : null}
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
       </div>
+    </div>
+    
+    <div className="absolute top-6 right-6 z-10">
+      {isComingSoon ? null : (
+        <div 
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          className={cn(
+            "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all cursor-pointer",
+            active ? "bg-[#5789FF] border-[#5789FF] text-white" : "border-white/20 hover:border-white/40"
+          )}
+        >
+          {active && <Check className="w-3.5 h-3.5" />}
+        </div>
+      )}
     </div>
 
     {/* Sub-items for RSS Card if selected and in Silent Layout */}
@@ -62,7 +84,8 @@ const SourceCard = ({ icon: Icon, title, description, active, selected, onToggle
       </div>
     )}
   </div>
-);
+  );
+};
 
 const SubSourceItem = ({ label, checked }: any) => (
   <div className="flex items-center gap-3 p-4 bg-black/40 border border-white/5 rounded-xl group/sub">
@@ -117,9 +140,14 @@ export default function ModuleList({
               selected={selectedModuleId === mod.id}
               active={enabledModuleIds.includes(mod.id)}
               onSelect={() => onSelect(mod.id)}
-              onToggle={() => onToggle(mod.id)}
+              onToggle={() => {
+                if (mod.availability !== "coming_soon") {
+                  onToggle(mod.id);
+                }
+              }}
               hasRequired={hasRequired}
               isReady={isReady}
+              availability={mod.availability}
             />
           );
         })}

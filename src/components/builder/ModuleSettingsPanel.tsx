@@ -30,6 +30,7 @@ interface ModuleSettingsPanelProps {
   onSave: () => void;
   isSaving: boolean;
   connectorStatus?: Record<string, string>;
+  onConfigClose?: () => void;
 }
 
 export default function ModuleSettingsPanel({ 
@@ -38,7 +39,8 @@ export default function ModuleSettingsPanel({
   onUpdate, 
   onSave,
   isSaving,
-  connectorStatus 
+  connectorStatus,
+  onConfigClose
 }: ModuleSettingsPanelProps) {
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
@@ -203,7 +205,10 @@ export default function ModuleSettingsPanel({
 
       <ConfigModal 
         isOpen={configModalOpen} 
-        onClose={() => setConfigModalOpen(false)} 
+        onClose={() => {
+           setConfigModalOpen(false);
+           if (onConfigClose) onConfigClose();
+        }} 
         title={`${(activeProvider || "").toUpperCase()} Integration`} 
         provider={activeProvider} 
       />

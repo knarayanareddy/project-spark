@@ -17,7 +17,7 @@ export const config = {
 
 export type Config = typeof config;
 
-export function validateConfig() {
+export function validateConfig(throwOnError = false) {
   const required = [
     "INTERNAL_API_KEY",
     "SUPABASE_URL",
@@ -31,13 +31,14 @@ export function validateConfig() {
   // Conditionally required
   if (config.AVATAR_PROVIDER === "fal") required.push("FAL_KEY");
   if (config.AVATAR_PROVIDER === "veed") required.push("VEED_API_KEY");
-  if (config.OPENAI_API_KEY === undefined) {
-     // OpenAI is usually required for generate-script, but start-render doesn't need it.
-     // We validate it in the function itself if needed.
-  }
 
   const missing = required.filter((key) => !config[key as keyof typeof config]);
   if (missing.length > 0) {
-    console.warn(`AI Provider keys missing: ${missing.join(", ")}. Fallbacks will be used.`);
+    const msg = `AI Provider keys missing: ${missing.join(", ")}. Fallbacks will be used.`;
+    if (throwOnError) {
+      throw new Error(msg);
+    } else {
+      console.warn(msg);
+    }
   }
 }

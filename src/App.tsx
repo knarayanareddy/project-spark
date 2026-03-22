@@ -7,9 +7,10 @@ import AppShell from "./components/layout/AppShell";
 import Today from "./pages/Today.tsx";
 import Connectors from "./pages/Connectors.tsx";
 import BriefingBuilder from "./pages/BriefingBuilder.tsx";
-import DevMode from "./pages/DevMode.tsx";
+import IntegrationLab from "./pages/IntegrationLab.tsx";
 import Vault from "./pages/Vault.tsx";
 import Auth from "./pages/Auth.tsx";
+import GoogleOAuthCallback from "./pages/GoogleOAuthCallback.tsx";
 import ReadingList from "./pages/ReadingList.tsx";
 import History from "./pages/History.tsx";
 import Settings from "./pages/Settings.tsx";
@@ -55,6 +56,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/auth" element={<Auth />} />
+          <Route path="/oauth/google/callback" element={<GoogleOAuthCallback />} />
           <Route path="/share/:token" element={<SharedBrief />} />
           <Route element={<RequireAuth><AppShell /></RequireAuth>}>
             <Route path="/" element={<Navigate to="/brief" replace />} />
@@ -63,7 +65,7 @@ const App = () => (
             <Route path="/builder" element={<BriefingBuilder />} />
             <Route path="/connectors" element={<Connectors />} />
             <Route path="/vault" element={<Vault />} />
-            <Route path="/dev-mode" element={<DevMode />} />
+            <Route path="/dev-mode" element={<IntegrationLab />} />
             <Route path="/reading-list" element={<ReadingList />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />

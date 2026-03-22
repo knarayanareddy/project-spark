@@ -7,8 +7,11 @@ import {
   assembleUserData, 
   syncRequiredConnectors,
   getBriefing,
-  type SegmentStatus 
+  getUserSettings,
+  type SegmentStatus,
+  type UserSettings
 } from "@/lib/api";
+import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { mockScriptJson } from "@/lib/mockData";
@@ -51,12 +54,16 @@ export default function Today() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasSession, setHasSession] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [settings, setSettings] = useState<UserSettings | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const selectedProfileId = localStorage.getItem("selectedProfileId");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setHasSession(!!session || isDevMode));
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setHasSession(!!session || isDevMode);
+      if (session) getUserSettings().then(setSettings).catch(() => {});
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setHasSession(!!s || isDevMode));
     return () => subscription.unsubscribe();
   }, [isDevMode]);
@@ -86,6 +93,12 @@ export default function Today() {
         if (status.status === "complete" || status.status === "failed") {
           if (pollRef.current) clearInterval(pollRef.current);
           setAppState(status.status === "complete" ? "ready" : "script_ready");
+          
+          if (status.status === "complete" && settings?.notification_prefs?.genComplete) {
+            toast.success("Briefing Rendered", { description: "Your daily intelligence is ready for playback." });
+          } else if (status.status === "failed" && settings?.notification_prefs?.genError) {
+            toast.error("Render Failed", { description: "An error occurred during the orchestration phase." });
+          }
         }
       } catch (e: any) {
         addError("Polling error: " + e.message);

@@ -7,6 +7,8 @@ import { syncRssForUser } from "../_shared/syncers/rss.ts";
 import { syncGithubForUser } from "../_shared/syncers/github.ts";
 import { syncGmailForUser } from "../_shared/syncers/gmail.ts";
 import { syncSlackForUser } from "../_shared/syncers/slack.ts";
+import { syncWeatherForUser } from "../_shared/syncers/weather.ts";
+import { syncCalendarForUser } from "../_shared/syncers/calendar.ts";
 import { shouldSkipSyncNow } from "../_shared/connectorHealth.ts";
 
 validateConfig();
@@ -55,8 +57,6 @@ serve(async (req: Request) => {
 
     // 3. Orchestrate Syncs
     for (const provider of requiredProviders) {
-      if (provider === "weather") continue; // Public/Direct fetch, no connector sync needed
-
       syncPromises.push((async () => {
         try {
           // A. Check skip logic (backoff/cooldown)
@@ -96,9 +96,13 @@ serve(async (req: Request) => {
           } else if (provider === "github") {
             syncRes = await syncGithubForUser(supabase, { userId, secretKey: config.CONNECTOR_SECRET_KEY! });
           } else if (provider === "google") {
-            syncRes = await syncGmailForUser(supabase, { userId });
+            const calRes = await syncCalendarForUser(supabase, { userId, secretKey: config.CONNECTOR_SECRET_KEY! });
+            const mixRes = await syncGmailForUser(supabase, { userId });
+            syncRes = { items_synced: (calRes.items_synced || 0) + (mixRes.items_synced || 0) };
           } else if (provider === "slack") {
             syncRes = await syncSlackForUser(supabase, { userId, secretKey: config.CONNECTOR_SECRET_KEY! });
+          } else if (provider === "weather") {
+            syncRes = await syncWeatherForUser(supabase, { userId });
           }
 
           results.push({ provider, outcome: "success", items_synced: syncRes?.items_synced || 0 });
