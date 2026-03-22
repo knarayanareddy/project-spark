@@ -102,7 +102,7 @@ export default function Today() {
         addError("Polling error: " + e.message);
       }
     }, 3000);
-  }, [settings]);
+  }, [settings?.notification_prefs?.genComplete, settings?.notification_prefs?.genError]);
 
   useEffect(() => {
     if (urlScriptId) {
@@ -182,7 +182,10 @@ export default function Today() {
         if (apiKey) setInternalApiKey(apiKey);
         
         const assembled = await assembleUserData();
-        const res = await generateScript({}, assembled.user_data, selectedProfileId || undefined);
+        const res = await generateScript({ 
+          user_data: assembled.user_data,
+          profile_id: selectedProfileId || undefined
+        });
         setScriptId(res.script_id);
         setScriptJson(res.script_json);
         

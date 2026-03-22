@@ -26,18 +26,16 @@ serve(async (req: Request) => {
     const userId = auth.user_id;
 
     // Try to get settings
-    const { data: existingSettings, error: fetchError } = await supabase
+    const { data: settings, error: fetchError } = await supabase
       .from("user_settings")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
 
     if (fetchError) throw fetchError;
-    let settings = existingSettings;
 
     // Seed if missing
     if (!settings) {
-      // Cast auth to any for email access if type is incomplete
       const authData = auth as any;
       const { data: newUser, error: createError } = await supabase
         .from("user_settings")
@@ -59,7 +57,10 @@ serve(async (req: Request) => {
         .single();
       
       if (createError) throw createError;
-      settings = newUser;
+      
+      return new Response(JSON.stringify(newUser), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
     return new Response(JSON.stringify(settings), {

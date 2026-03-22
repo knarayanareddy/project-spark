@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { 
   Terminal, 
   Shield, 
@@ -66,7 +66,7 @@ export default function IntegrationLab() {
     setE2ELogs(prev => [{ time: new Date().toLocaleTimeString(), msg, level }, ...prev].slice(0, 50));
   };
 
-  const runPreflight = React.useCallback(async () => {
+  const runPreflight = useCallback(async () => {
     setIsPreflighting(true);
     try {
       const res = await systemPreflight();
