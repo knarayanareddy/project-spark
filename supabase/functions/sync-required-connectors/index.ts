@@ -6,6 +6,7 @@ import { getModule, ModuleId } from "../_shared/moduleManifest.ts";
 import { syncRssForUser } from "../_shared/syncers/rss.ts";
 import { syncGithubForUser } from "../_shared/syncers/github.ts";
 import { syncGmailForUser } from "../_shared/syncers/gmail.ts";
+import { syncSlackForUser } from "../_shared/syncers/slack.ts";
 import { shouldSkipSyncNow } from "../_shared/connectorHealth.ts";
 
 validateConfig();
@@ -95,6 +96,8 @@ serve(async (req: Request) => {
             syncRes = await syncGithubForUser(supabase, { userId, secretKey: config.CONNECTOR_SECRET_KEY! });
           } else if (provider === "google") {
             syncRes = await syncGmailForUser(supabase, { userId });
+          } else if (provider === "slack") {
+            syncRes = await syncSlackForUser(supabase, { userId, secretKey: config.CONNECTOR_SECRET_KEY! });
           }
 
           results.push({ provider, outcome: "success", items_synced: syncRes?.items_synced || 0 });

@@ -1,16 +1,17 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { 
-  LayoutDashboard, 
-  Settings, 
-  BookOpen, 
-  Plus,
+  FileText,
+  Zap,
   Network,
-  Terminal,
-  ChevronRight
+  Lock,
+  Settings,
+  Plus,
+  Box
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const SidebarItem = ({ icon: Icon, label, href, active }: any) => (
   <Link 
@@ -34,19 +35,38 @@ export default function Sidebar() {
   return (
     <aside className="w-64 h-full bg-[#0B0E14] border-r border-white/5 flex flex-col p-6 animate-in slide-in-from-left duration-700">
       {/* Brand */}
-      <div className="flex flex-col gap-1 mb-10 px-2">
-        <h1 className="text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
-          Silent Architect
-        </h1>
-        <p className="text-[10px] uppercase font-black tracking-[0.2em] text-muted-foreground opacity-50">
-          AI ORCHESTRATION
-        </p>
+      <div className="flex items-center gap-3 mb-8 px-2">
+        <div className="w-8 h-8 rounded-lg bg-[#5789FF]/20 flex items-center justify-center border border-[#5789FF]/30">
+          <Box className="w-5 h-5 text-[#5789FF]" />
+        </div>
+        <div className="flex flex-col">
+          <h1 className="text-sm font-bold tracking-tight text-white leading-tight">
+            Silent Architect
+          </h1>
+          <p className="text-[9px] uppercase font-black tracking-[0.2em] text-muted-foreground opacity-50">
+            AI ORCHESTRATION
+          </p>
+        </div>
+      </div>
+
+      {/* Primary Action */}
+      <div className="mb-10 px-2">
+        <Button className="w-full sa-button-primary rounded-xl py-6 flex items-center justify-start gap-3 group px-4">
+          <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
+          <span className="font-bold text-sm">New Brief</span>
+        </Button>
       </div>
 
       {/* Navigation */}
-      <div className="flex-1 space-y-2">
+      <div className="flex-1 space-y-1">
         <SidebarItem 
-          icon={LayoutDashboard} 
+          icon={FileText} 
+          label="Your Brief" 
+          href="/brief" 
+          active={location.pathname === "/brief"} 
+        />
+        <SidebarItem 
+          icon={Zap} 
           label="Builder" 
           href="/builder" 
           active={location.pathname === "/builder"} 
@@ -58,23 +78,30 @@ export default function Sidebar() {
           active={location.pathname === "/connectors"} 
         />
         <SidebarItem 
-          icon={Terminal} 
-          label="Developer Mode" 
-          href="/dev-mode" 
-          active={location.pathname === "/dev-mode"} 
+          icon={Lock} 
+          label="Vault" 
+          href="/vault" 
+          active={location.pathname === "/vault"} 
+        />
+        <SidebarItem 
+          icon={Settings} 
+          label="Settings" 
+          href="/settings" 
+          active={location.pathname === "/settings"} 
         />
       </div>
 
-      {/* Footer Actions */}
-      <div className="mt-auto space-y-6">
-        <Button className="w-full sa-button-primary rounded-2xl py-6 flex items-center gap-2 group">
-          <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
-          <span>New Pipeline</span>
-        </Button>
-
-        <div className="space-y-1">
-          <SidebarItem icon={Settings} label="Settings" href="/settings" />
-          <SidebarItem icon={BookOpen} label="Documentation" href="/docs" />
+      {/* User Profile Footer */}
+      <div className="mt-auto pt-6 border-t border-white/5">
+        <div className="flex items-center gap-3 px-2 py-1 group cursor-pointer">
+          <Avatar className="w-10 h-10 border border-white/10 ring-2 ring-transparent group-hover:ring-[#5789FF]/20 transition-all">
+            <AvatarImage src="https://github.com/shadcn.png" />
+            <AvatarFallback className="bg-white/5 text-[10px]">JV</AvatarFallback>
+          </Avatar>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-bold text-white truncate">Julian Vane</span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium opacity-70">Principal Architect</span>
+          </div>
         </div>
       </div>
     </aside>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { getProfiles, upsertProfile, getModuleCatalog } from "@/lib/api";
+import { getProfiles, upsertProfile, getModuleCatalog, previewPlan } from "@/lib/api";
 import { toast } from "sonner";
 import { Plus, Settings, Rocket, Database, Activity, Clock, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,15 +21,40 @@ export default function BriefingBuilder() {
   const [moduleSettings, setModuleSettings] = useState<Record<string, any>>({});
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
   const [profileName, setProfileName] = useState("");
+  const [frequency, setFrequency] = useState("manual");
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [previewResult, setPreviewResult] = useState<any>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [connectorStatus, setConnectorStatus] = useState<Record<string, any>>({});
+  const [isSaving, setIsSaving] = useState(false);
   const { isDevMode } = useDevMode();
   
   const [loginEmail, setLoginEmail] = useState("");
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
+
+  const handlePreview = async () => {
+    if (!selectedProfileId) return;
+    setIsPreviewLoading(true);
+    try {
+      const res = await previewPlan(selectedProfileId);
+      setPreviewResult(res);
+      if (res.connector_status) {
+        setConnectorStatus(
+          res.connector_status.reduce((acc: any, curr: any) => ({ ...acc, [curr.provider]: curr.status }), {})
+        );
+      }
+    } catch (err: any) {
+      toast.error("Preview failed: " + err.message);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setPreviewResult(null);
+  }, [selectedProfileId, enabledModuleIds]);
+
 
   useEffect(() => {
     checkSession();
@@ -61,48 +87,83 @@ export default function BriefingBuilder() {
     let profs: any[] = [];
     let catalog: any[] = [];
 
-    if (isDevModeEnabled()) {
-      profs = [
-        { 
-          id: "mock-1", 
-          name: "CTO Technical Brief", 
-          description: "Focuses on infrastructure, AI benchmarks, and security vulnerabilities.",
-          enabled_modules: ["rss", "github"], 
-          module_settings: {},
-          persona: "Technical CTO",
-          timezone: "UTC",
-          updated_at: new Date().toISOString()
-        },
-        { 
-          id: "mock-2", 
-          name: "Venture Capitalist", 
-          description: "Market trends, funding rounds, and emerging startup signals.",
-          enabled_modules: ["rss"], 
-          module_settings: {},
-          persona: "Investor",
-          timezone: "UTC",
-          updated_at: new Date().toISOString()
-        }
-      ];
-    }
-
     try {
+      // 1. Load Real Data from API
       const [realProfs, realCatalog] = await Promise.all([
         getProfiles().catch(() => []), 
         getModuleCatalog().catch(() => [])
       ]);
-      if (realProfs && realProfs.length > 0) profs = [...profs, ...realProfs];
+      
+      if (realProfs && realProfs.length > 0) profs = [...realProfs];
       catalog = realCatalog || [];
-    } catch (err: any) {
-      console.warn("Builder API fail", err);
-    } finally {
+
+      // 2. If no real profiles, and in Dev Mode (or as fallback), seed with mocks
+      if (profs.length === 0 && isDevModeEnabled()) {
+        profs = [
+          { 
+            id: "mock-1", 
+            name: "Strategic CTO", 
+            description: "Infrastructure oversight, AI benchmarks, and critical security vulnerabilities.",
+            enabled_modules: ["rss", "github_prs", "inbox_triage"], 
+            module_settings: {},
+            persona: "Technical CTO",
+            frequency: "daily",
+            timezone: "UTC",
+            updated_at: new Date().toISOString()
+          },
+          { 
+            id: "mock-2", 
+            name: "Product Innovation Lead", 
+            description: "Market shifts, competitor releases, and emerging consumer signals.",
+            enabled_modules: ["ai_news_delta", "slack_updates"], 
+            module_settings: {},
+            persona: "Product Lead",
+            frequency: "twice_daily",
+            timezone: "UTC",
+            updated_at: new Date().toISOString()
+          },
+          { 
+            id: "mock-3", 
+            name: "Security Auditor", 
+            description: "Zero-day alerts, dependency vulnerabilities, and compliance drift.",
+            enabled_modules: ["github_mentions", "watchlist_alerts"], 
+            module_settings: {},
+            persona: "Auditor",
+            frequency: "hourly",
+            timezone: "UTC",
+            updated_at: new Date().toISOString()
+          },
+          { 
+            id: "mock-4", 
+            name: "Venture Partner", 
+            description: "Funding rounds, tech acquisitions, and talent migration patterns.",
+            enabled_modules: ["hn_top", "linkedin_network"], 
+            module_settings: {},
+            persona: "Investor",
+            frequency: "manual",
+            timezone: "UTC",
+            updated_at: new Date().toISOString()
+          }
+        ];
+      }
+
       setProfiles(profs);
       setModuleCatalog(catalog);
+
+      // 3. Selection Logic
       const lastId = localStorage.getItem("selectedProfileId");
-      if (lastId && profs.find(p => p.id === lastId)) {
-        handleProfileSelect(lastId, profs);
-      } else if (profs.length > 0) {
-        handleProfileSelect(profs[0].id, profs);
+      const toSelect = profs.find(p => p.id === lastId) || profs[0];
+      if (toSelect) {
+        handleProfileSelect(toSelect.id, profs);
+      }
+
+    } catch (err: any) {
+      console.error("Failed to load initial data:", err);
+      toast.error("Using local mock architecture (Sync unavailable)");
+    } finally {
+      // Ensure we have a default selection if catalog is loaded
+      if (catalog.length > 0 && !selectedModuleId) {
+        setSelectedModuleId(catalog[0].id);
       }
       setLoading(false);
     }
@@ -115,9 +176,33 @@ export default function BriefingBuilder() {
     setProfileName(p.name);
     setEnabledModuleIds(p.enabled_modules || []);
     setModuleSettings(p.module_settings || {});
+    setFrequency(p.frequency || "manual");
     localStorage.setItem("selectedProfileId", id);
     if (p.enabled_modules?.length > 0 && !selectedModuleId) {
        setSelectedModuleId(p.enabled_modules[0]);
+    }
+  };
+
+  const handleUpdateProfile = async (updates: Partial<any>) => {
+    if (!selectedProfileId || selectedProfileId.startsWith("mock-")) {
+       // Just update local state for mock
+       if (updates.enabled_modules) setEnabledModuleIds(updates.enabled_modules);
+       if (updates.module_settings) setModuleSettings(updates.module_settings);
+       if (updates.frequency) setFrequency(updates.frequency);
+       return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updated = await upsertProfile({ id: selectedProfileId, ...updates });
+      setProfiles(prev => prev.map(p => p.id === updated.id ? updated : p));
+      if (updates.enabled_modules) setEnabledModuleIds(updated.enabled_modules);
+      if (updates.module_settings) setModuleSettings(updated.module_settings);
+      if (updates.frequency) setFrequency(updated.frequency || "manual");
+    } catch (err: any) {
+      toast.error("Failed to sync profile: " + err.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -187,10 +272,34 @@ export default function BriefingBuilder() {
         <section className="space-y-6">
           <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-white/40">Briefing Frequency</h3>
           <div className="grid grid-cols-2 gap-3">
-             <Button variant="outline" className="h-14 bg-white/[0.02] border-white/5 hover:bg-white/5 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white/60">Daily Morning</Button>
-             <Button className="h-14 sa-button-primary rounded-xl font-bold text-[10px] uppercase tracking-widest">As-it-Happens</Button>
-             <Button variant="outline" className="h-14 bg-white/[0.02] border-white/5 hover:bg-white/5 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white/60">Weekly Recap</Button>
-             <Button variant="outline" className="h-14 bg-white/[0.02] border-white/5 hover:bg-white/5 rounded-xl font-bold text-[10px] uppercase tracking-widest text-white/60">Custom Cron</Button>
+             <Button 
+                variant={frequency === "daily" ? "default" : "outline"} 
+                onClick={() => handleUpdateProfile({ frequency: "daily" })}
+                className={cn("h-14 rounded-xl font-bold text-[10px] uppercase tracking-widest", frequency === "daily" ? "sa-button-primary" : "bg-white/[0.02] border-white/5 hover:bg-white/5 text-white/60")}
+              >
+                Daily Morning
+              </Button>
+             <Button 
+                variant={frequency === "hourly" ? "default" : "outline"} 
+                onClick={() => handleUpdateProfile({ frequency: "hourly" })}
+                className={cn("h-14 rounded-xl font-bold text-[10px] uppercase tracking-widest", frequency === "hourly" ? "sa-button-primary" : "bg-white/[0.02] border-white/5 hover:bg-white/5 text-white/60")}
+              >
+                As-it-Happens
+              </Button>
+             <Button 
+                variant={frequency === "weekly" ? "default" : "outline"} 
+                onClick={() => handleUpdateProfile({ frequency: "weekly" })}
+                className={cn("h-14 rounded-xl font-bold text-[10px] uppercase tracking-widest", frequency === "weekly" ? "sa-button-primary" : "bg-white/[0.02] border-white/5 hover:bg-white/5 text-white/60")}
+              >
+                Weekly Recap
+              </Button>
+             <Button 
+                variant={frequency === "manual" ? "default" : "outline"} 
+                onClick={() => handleUpdateProfile({ frequency: "manual" })}
+                className={cn("h-14 rounded-xl font-bold text-[10px] uppercase tracking-widest", frequency === "manual" ? "sa-button-primary" : "bg-white/[0.02] border-white/5 hover:bg-white/5 text-white/60")}
+              >
+                Manual Only
+              </Button>
           </div>
         </section>
 
@@ -213,12 +322,38 @@ export default function BriefingBuilder() {
             modules={moduleCatalog}
             enabledModuleIds={enabledModuleIds}
             selectedModuleId={selectedModuleId}
-            onToggle={(id) => setEnabledModuleIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+            onToggle={(id) => {
+               const next = enabledModuleIds.includes(id) 
+                 ? enabledModuleIds.filter(x => x !== id) 
+                 : [...enabledModuleIds, id];
+               handleUpdateProfile({ enabled_modules: next });
+            }}
             onSelect={setSelectedModuleId}
             connectorStatus={connectorStatus}
-            layout="silent" // We'll update ModuleList to handle this prop
+            layout="silent"
           />
         </div>
+
+        {selectedModuleId && (
+           <div className="pt-4 border-t border-white/5 animate-in fade-in duration-500">
+              <ModuleSettingsPanel 
+                 module={moduleCatalog.find(m => m.id === selectedModuleId)}
+                 settings={moduleSettings[selectedModuleId] || {}}
+                 onUpdate={(key, val) => {
+                    const nextSettings = {
+                       ...moduleSettings,
+                       [selectedModuleId]: {
+                          ...(moduleSettings[selectedModuleId] || {}),
+                          [key]: val
+                       }
+                    };
+                    handleUpdateProfile({ module_settings: nextSettings });
+                 }}
+                 onSave={() => handleUpdateProfile({})}
+                 isSaving={isSaving}
+              />
+           </div>
+        )}
       </div>
 
       {/* COLUMN 3: Briefing Preview */}
@@ -226,7 +361,7 @@ export default function BriefingBuilder() {
         <div className="space-y-6 flex-1">
           <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-white/40">Briefing Preview</h3>
           <PreviewPanel 
-            onPreview={() => {}}
+            onPreview={handlePreview}
             isLoading={isPreviewLoading}
             result={previewResult}
             layout="silent" // We'll update PreviewPanel to handle this prop

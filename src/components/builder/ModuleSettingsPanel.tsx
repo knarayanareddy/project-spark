@@ -1,11 +1,12 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Save, Info } from "lucide-react";
+import { AlertCircle, Save, Info, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 
 interface SettingsUi {
-  type: "string_list" | "int";
+  type: "string_list" | "int" | "number" | "boolean" | "multiselect" | "text";
   label: string;
   description: string;
   placeholder?: string;
@@ -33,6 +34,17 @@ export default function ModuleSettingsPanel({
   onSave,
   isSaving 
 }: ModuleSettingsPanelProps) {
+  if (!module) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center p-8 text-center space-y-4 animate-pulse">
+        <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+          <Settings className="w-6 h-6 text-white/20 animate-spin" />
+        </div>
+        <p className="text-sm text-muted-foreground">Initializing engine configuration...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-background animate-in fade-in slide-in-from-right-4 duration-500">
       <div className="p-6 border-b border-border bg-card/50">
@@ -45,7 +57,7 @@ export default function ModuleSettingsPanel({
             {isSaving ? "Saving..." : "Save Profile"}
           </Button>
         </div>
-        <h2 className="text-2xl font-bold text-foreground">{module.name}</h2>
+        <h2 className="text-2xl font-bold text-foreground">{module.name || (module as any).label}</h2>
         <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
           {module.description}
         </p>
@@ -59,17 +71,29 @@ export default function ModuleSettingsPanel({
           </div>
         ) : (
           Object.entries(module.settingsUi).map(([key, ui]) => (
-            <div key={key} className="space-y-3 max-w-xl group">
-              <div className="space-y-1">
-                <Label htmlFor={key} className="text-sm font-bold group-hover:text-primary transition-colors">
-                  {ui.label}
-                </Label>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {ui.description}
-                </p>
+            <div key={key} className="space-y-4 max-w-xl group relative">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor={key} className="text-sm font-bold group-hover:text-primary transition-colors">
+                    {ui.label}
+                  </Label>
+                  {ui.type === "boolean" && (
+                    <Switch
+                      id={key}
+                      checked={!!settings[key]}
+                      onCheckedChange={(val) => onUpdate(key, val)}
+                      className="data-[state=checked]:bg-primary"
+                    />
+                  )}
+                </div>
+                {ui.description && (
+                  <p className="text-[11px] text-muted-foreground leading-relaxed pr-12">
+                     {ui.description}
+                  </p>
+                )}
               </div>
 
-              {ui.type === "int" ? (
+              {ui.type === "int" || ui.type === "number" ? (
                 <div className="flex items-center gap-4">
                   <Input
                     id={key}
@@ -78,31 +102,39 @@ export default function ModuleSettingsPanel({
                     max={ui.max}
                     value={settings[key] ?? ""}
                     onChange={(e) => onUpdate(key, parseInt(e.target.value) || 0)}
-                    className="w-32 bg-secondary border-border"
+                    className="w-32 bg-secondary/50 border-border h-11 px-4 rounded-xl"
                   />
                   {(ui.min !== undefined || ui.max !== undefined) && (
-                    <span className="text-[10px] font-mono text-muted-foreground">
+                    <span className="text-[10px] font-mono text-muted-foreground/50">
                       Range: {ui.min ?? "0"}-{ui.max ?? "∞"}
                     </span>
                   )}
                 </div>
-              ) : (
-                <div className="space-y-2">
+              ) : ui.type === "multiselect" || ui.type === "string_list" ? (
+                <div className="space-y-3">
                   <Input
                     id={key}
                     placeholder={ui.placeholder || "Enter items separated by commas..."}
                     value={Array.isArray(settings[key]) ? settings[key].join(", ") : ""}
                     onChange={(e) => onUpdate(key, e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-                    className="bg-secondary border-border"
+                    className="bg-secondary/50 border-border h-11 px-4 rounded-xl placeholder:text-muted-foreground/30"
                   />
                   <div className="flex flex-wrap gap-1.5 min-h-[1.5rem]">
-                    {(settings[key] as string[] || []).map((tag, i) => (
-                      <Badge key={i} variant="secondary" className="text-[10px] px-2 py-0 h-5 bg-primary/5 text-primary border-primary/10">
+                    {(Array.isArray(settings[key]) ? settings[key] : []).map((tag: any, i: number) => (
+                      <Badge key={i} variant="secondary" className="text-[10px] px-2.5 py-0.5 h-6 bg-primary/10 text-primary border-primary/20 rounded-lg">
                         {tag}
                       </Badge>
                     ))}
                   </div>
                 </div>
+              ) : ui.type === "boolean" ? null : (
+                <Input
+                  id={key}
+                  placeholder={ui.placeholder}
+                  value={settings[key] ?? ""}
+                  onChange={(e) => onUpdate(key, e.target.value)}
+                  className="bg-secondary/50 border-border h-11 px-4 rounded-xl"
+                />
               )}
             </div>
           ))

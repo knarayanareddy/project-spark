@@ -7,7 +7,8 @@ import {
   Check, 
   ChevronRight,
   Plus,
-  GripVertical
+  GripVertical,
+  Database
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -91,31 +92,37 @@ const RepoPill = ({ name, subs }: any) => (
   </div>
 );
 
-export default function ModuleList({ modules, enabledModuleIds, selectedModuleId, onToggle, onSelect, layout }: any) {
+export default function ModuleList({ 
+  modules, 
+  enabledModuleIds, 
+  selectedModuleId, 
+  onToggle, 
+  onSelect, 
+  connectorStatus,
+  layout 
+}: any) {
   if (layout === "silent") {
     return (
       <div className="space-y-4">
-        <SourceCard 
-          icon={Rss}
-          title="Technical RSS Feeds"
-          description="Select and prioritize the data modules for the AI agent to ingest."
-          selected={selectedModuleId === "rss"}
-          onSelect={() => onSelect("rss")}
-        />
-        <SourceCard 
-          icon={Github}
-          title="GitHub Repository Tracking"
-          description="Monitor PRs, issues, and core development activity."
-          selected={selectedModuleId === "github"}
-          onSelect={() => onSelect("github")}
-        />
-        <SourceCard 
-          icon={Mail}
-          title="Gmail Intelligence Filters"
-          description="Filter incoming noise to focus on high-priority signals."
-          selected={selectedModuleId === "gmail"}
-          onSelect={() => onSelect("gmail")}
-        />
+        {modules.map((mod: any) => {
+          let Icon = Database;
+          if (mod.id.includes("rss")) Icon = Rss;
+          if (mod.id.includes("github")) Icon = Github;
+          if (mod.id.includes("mail") || mod.id.includes("gmail") || mod.id.includes("inbox")) Icon = Mail;
+          
+          return (
+            <SourceCard 
+              key={mod.id}
+              icon={Icon}
+              title={mod.label || mod.name}
+              description={mod.description}
+              selected={selectedModuleId === mod.id}
+              active={enabledModuleIds.includes(mod.id)}
+              onSelect={() => onSelect(mod.id)}
+              onToggle={() => onToggle(mod.id)}
+            />
+          );
+        })}
       </div>
     );
   }

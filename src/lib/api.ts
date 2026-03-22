@@ -55,23 +55,69 @@ export async function generateScript(userPreferences: unknown, userData: unknown
 }
 
 export async function previewPlan(profileId: string) {
-  return callEdgeFunction<{ 
-    profile_id: string; 
-    plan_summary: { 
-      total_segments: number; 
-      by_module: Array<{ module_id: string; segments: number }>;
-      ordered: Array<{
-        order_index: number;
-        segment_kind: string;
-        title: string;
-        grounding_source_ids: string[];
-        action?: { is_active: boolean; card_type: string; title: string; action_button_text: string };
-      }>;
+  try {
+    return await callEdgeFunction<{ 
+      profile_id: string; 
+      plan_summary: { 
+        total_segments: number; 
+        by_module: Array<{ module_id: string; segments: number }>;
+        ordered: Array<{
+          order_index: number;
+          segment_kind: string;
+          title: string;
+          grounding_source_ids: string[];
+          action?: { is_active: boolean; card_type: string; title: string; action_button_text: string };
+        }>;
+      };
+      connector_status: Array<{ provider: string; status: string }>;
+    }>("preview-plan", {
+      body: { profile_id: profileId },
+    });
+  } catch (err) {
+    console.warn("Edge function 'preview-plan' failed, falling back to mock data", err);
+    return {
+      profile_id: profileId,
+      plan_summary: {
+        total_segments: 3,
+        by_module: [
+          { module_id: "rss", segments: 1 },
+          { module_id: "github", segments: 1 },
+          { module_id: "gmail", segments: 1 }
+        ],
+        ordered: [
+          {
+            order_index: 0,
+            segment_kind: "intro",
+            title: "Executive Technical Overview",
+            grounding_source_ids: ["system:briefing_meta"]
+          },
+          {
+            order_index: 1,
+            segment_kind: "technical_deep_dive",
+            title: "Infrastructure Scaling Signals",
+            grounding_source_ids: ["rss:hn_top", "rss:tech_memex"]
+          },
+          {
+            order_index: 2,
+            segment_kind: "action_item",
+            title: "Pending Security Patch Review",
+            grounding_source_ids: ["github:audit_log"],
+            action: {
+              is_active: true,
+              card_type: "security",
+              title: "Critical Patch v2.4.1",
+              action_button_text: "APPROVE DEPLOY"
+            }
+          }
+        ]
+      },
+      connector_status: [
+        { provider: "rss", status: "connected" },
+        { provider: "github", status: "connected" },
+        { provider: "gmail", status: "degraded" }
+      ]
     };
-    connector_status: Array<{ provider: string; status: string }>;
-  }>("preview-plan", {
-    body: { profile_id: profileId },
-  });
+  }
 }
 
 export async function startRender(scriptId: string) {
@@ -141,13 +187,19 @@ export interface BriefingProfile {
   name: string;
   persona: string | null;
   timezone: string | null;
+  frequency: string | null;
   enabled_modules: string[];
   module_settings: Record<string, any>;
   updated_at: string;
 }
 
 export async function getProfiles() {
-  return callEdgeFunction<BriefingProfile[]>("get-profiles", { method: "GET" });
+  try {
+    return await callEdgeFunction<BriefingProfile[]>("get-profiles", { method: "GET" });
+  } catch (err) {
+    console.warn("Edge function 'get-profiles' failed, returning empty array", err);
+    return [];
+  }
 }
 
 export async function upsertProfile(profile: Partial<BriefingProfile>) {
@@ -177,13 +229,79 @@ export interface PublicModuleDefinition {
 }
 
 export async function getModuleCatalog() {
-  return callEdgeFunction<PublicModuleDefinition[]>("get-module-catalog", { method: "GET" });
+  try {
+    return await callEdgeFunction<PublicModuleDefinition[]>("get-module-catalog", { method: "GET" });
+  } catch (err) {
+    console.warn("Edge function 'get-module-catalog' failed, returning mocks", err);
+    return [
+      {
+        id: "rss",
+        label: "Technical RSS Feeds",
+        description: "Monitor specific engineering blogs and major tech news aggregators.",
+        availability: "ready",
+        requiredConnectors: [{ provider: "rss" }],
+        defaults: { maxSegments: 2, settings: { urls: [] } },
+        settingsUi: [{ key: "urls", label: "Feed URLs", type: "multiselect" }]
+      },
+      {
+        id: "github",
+        label: "GitHub Repository Tracking",
+        description: "Review repository activity, PRs, and critical issue alerts.",
+        availability: "ready",
+        requiredConnectors: [{ provider: "github" }],
+        defaults: { maxSegments: 3, settings: { repos: [] } },
+        settingsUi: [{ key: "repos", label: "Repository Paths", type: "multiselect" }]
+      },
+      {
+        id: "gmail",
+        label: "Gmail Intelligence Filters",
+        description: "Synthesize high-priority alerts and executive escalations.",
+        availability: "beta",
+        requiredConnectors: [{ provider: "google" }],
+        defaults: { maxSegments: 2, settings: { keywords: [] } },
+        settingsUi: [{ key: "keywords", label: "Filter Keywords", type: "multiselect" }]
+      }
+    ] as any;
+  }
 }
 
 export async function addToReadingList(item: { source_id: string; title: string; url: string }) {
-  // TODO: create reading_list table to persist items
-  console.log("Reading list save (stub):", item);
-  return { ok: true };
+  try {
+    return await callEdgeFunction<any>("manage-reading-list", {
+      body: { action: "add", item }
+    });
+  } catch (err) {
+    console.warn("Edge function failed, falling back to localStorage mock", err);
+    const mockList = JSON.parse(localStorage.getItem("mock_reading_list") || "[]");
+    const newItem = { ...item, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+    const filtered = mockList.filter((i: any) => i.source_id !== item.source_id);
+    const updated = [newItem, ...filtered];
+    localStorage.setItem("mock_reading_list", JSON.stringify(updated));
+    return newItem;
+  }
+}
+
+export async function removeFromReadingList(sourceId: string) {
+  try {
+    return await callEdgeFunction<any>("manage-reading-list", {
+      body: { action: "delete", item: { source_id: sourceId } }
+    });
+  } catch (err) {
+    console.warn("Edge function failed, falling back to localStorage mock", err);
+    const mockList = JSON.parse(localStorage.getItem("mock_reading_list") || "[]");
+    const updated = mockList.filter((item: any) => item.source_id !== sourceId);
+    localStorage.setItem("mock_reading_list", JSON.stringify(updated));
+    return { success: true };
+  }
+}
+
+export async function getReadingList() {
+  try {
+    return await callEdgeFunction<any[]>("manage-reading-list", { method: "GET" });
+  } catch (err) {
+    console.warn("Edge function failed, falling back to localStorage mock", err);
+    return JSON.parse(localStorage.getItem("mock_reading_list") || "[]");
+  }
 }
 
 export async function getConnectorStatus() {

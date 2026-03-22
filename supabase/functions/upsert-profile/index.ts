@@ -43,6 +43,7 @@ serve(async (req) => {
       name: migrated.name,
       persona: migrated.persona || null,
       timezone: migrated.timezone || null,
+      frequency: migrated.frequency || 'manual',
       enabled_modules: migrated.enabled_modules,
       module_settings: migrated.module_settings,
       module_catalog_version: MODULE_CATALOG_VERSION,

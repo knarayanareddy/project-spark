@@ -22,9 +22,11 @@ import ConfigModal from "@/components/connectors/ConfigModal";
 export default function Connectors() {
   const [isConfigOpen, setIsConfigOpen] = React.useState(false);
   const [configTitle, setConfigTitle] = React.useState("");
+  const [selectedProvider, setSelectedProvider] = React.useState<string | null>(null);
 
-  const handleConfigure = (title: string) => {
+  const handleConfigure = (title: string, provider: string) => {
     setConfigTitle(title);
+    setSelectedProvider(provider);
     setIsConfigOpen(true);
   };
 
@@ -87,7 +89,7 @@ export default function Connectors() {
           status="healthy"
           statusLabel="Healthy"
           stats={[{label: 'Last Sync', value: '2 mins ago'}, {label: 'Uptime', value: '99.98%'}]}
-          onConfigure={() => handleConfigure("GitHub Enterprise")}
+          onConfigure={() => handleConfigure("GitHub Enterprise", "github")}
         />
         <ConnectorCard 
           icon={Mail}
@@ -97,7 +99,7 @@ export default function Connectors() {
           status="error"
           statusLabel="Connection Lost"
           stats={[{label: 'Auth Error', value: 'Token Expired'}, {label: 'Last Sync', value: '4h 12m ago'}]}
-          onConfigure={() => handleConfigure("Gmail Workspace")}
+          onConfigure={() => handleConfigure("Gmail Workspace", "google")}
         />
         <ConnectorCard 
           icon={Rss}
@@ -107,7 +109,7 @@ export default function Connectors() {
           status="healthy"
           statusLabel="Healthy"
           stats={[{label: 'Feeds', value: '14 Active'}, {label: 'Last Sync', value: '12s ago'}]}
-          onConfigure={() => handleConfigure("Global Tech News")}
+          onConfigure={() => handleConfigure("Global Tech News", "rss")}
         />
         <ConnectorCard 
           icon={Slack}
@@ -117,7 +119,7 @@ export default function Connectors() {
           status="healthy"
           statusLabel="Healthy"
           stats={[{label: 'Last Sync', value: 'Just now'}, {label: 'Events', value: '1.2k today'}]}
-          onConfigure={() => handleConfigure("Slack Dev Hub")}
+          onConfigure={() => handleConfigure("Slack Dev Hub", "slack")}
         />
         <ConnectorCard 
           icon={BookOpen}
@@ -127,7 +129,7 @@ export default function Connectors() {
           status="warning"
           statusLabel="Warning"
           stats={[{label: 'Status', value: 'Partial Sync'}, {label: 'Latency', value: '850ms'}]}
-          onConfigure={() => handleConfigure("Notion Knowledge Base")}
+          onConfigure={() => handleConfigure("Notion Knowledge Base", "notion")}
         />
         
         {/* Integrate New Service Card */}
@@ -169,6 +171,7 @@ export default function Connectors() {
         isOpen={isConfigOpen} 
         onClose={() => setIsConfigOpen(false)} 
         title={configTitle} 
+        provider={selectedProvider}
       />
     </div>
   );
