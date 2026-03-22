@@ -66,7 +66,7 @@ export default function IntegrationLab() {
     setE2ELogs(prev => [{ time: new Date().toLocaleTimeString(), msg, level }, ...prev].slice(0, 50));
   };
 
-  const runPreflight = async () => {
+  const runPreflight = React.useCallback(async () => {
     setIsPreflighting(true);
     try {
       const res = await systemPreflight();
@@ -83,7 +83,7 @@ export default function IntegrationLab() {
     } finally {
       setIsPreflighting(false);
     }
-  };
+  }, [session]);
 
   const runSeed = async () => {
     if (!session) return toast.error("Sign-in required to seed data");
@@ -190,7 +190,7 @@ export default function IntegrationLab() {
     runPreflight();
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [runPreflight]);
 
   return (
     <div className="flex flex-col h-full bg-[#0B0E14] animate-in fade-in duration-1000">

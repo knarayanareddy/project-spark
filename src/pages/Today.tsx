@@ -5,7 +5,6 @@ import {
   getJobStatus, 
   setInternalApiKey, 
   assembleUserData, 
-  syncRequiredConnectors,
   getBriefing,
   getUserSettings,
   type SegmentStatus,
@@ -71,10 +70,9 @@ export default function Today() {
   const addError = (e: string) => setErrors((prev) => [...prev, e]);
 
   const handleSync = async () => {
-    if (!selectedProfileId) return;
     setIsSyncing(true);
     try {
-      await syncRequiredConnectors(selectedProfileId, "best_effort");
+      await assembleUserData();
     } catch (e: any) {
       addError("Sync failed: " + e.message);
     } finally {
@@ -94,17 +92,17 @@ export default function Today() {
           if (pollRef.current) clearInterval(pollRef.current);
           setAppState(status.status === "complete" ? "ready" : "script_ready");
           
-          if (status.status === "complete" && settings?.notification_prefs?.genComplete) {
-            toast.success("Briefing Rendered", { description: "Your daily intelligence is ready for playback." });
+           if (status.status === "complete" && settings?.notification_prefs?.genComplete) {
+            toast.success("Briefing Rendered");
           } else if (status.status === "failed" && settings?.notification_prefs?.genError) {
-            toast.error("Render Failed", { description: "An error occurred during the orchestration phase." });
+            toast.error("Render Failed");
           }
         }
       } catch (e: any) {
         addError("Polling error: " + e.message);
       }
     }, 3000);
-  }, []);
+  }, [settings]);
 
   useEffect(() => {
     if (urlScriptId) {
