@@ -168,8 +168,6 @@ export default function History() {
           ))}
         </div>
       )}
-        </div>
-      )}
 
       <ShareDialog 
         isOpen={shareConfig.isOpen}

@@ -102,7 +102,7 @@ export default function Today() {
           setScriptId(res.script.id);
           setScriptJson(res.script.script_json);
           
-          let activeJobId = urlJobId || res.latest_job?.id;
+          const activeJobId = urlJobId || res.latest_job?.id;
 
           if (activeJobId) {
             setJobId(activeJobId);
@@ -221,7 +221,7 @@ export default function Today() {
       addError(e.message);
       setAppState("script_ready");
     }
-  }, [scriptId, useMock, segments]);
+  }, [scriptId, useMock, segments, startPolling]);
 
   const handleVideoEnd = () => {
     if (currentIdx < segments.length - 1) {

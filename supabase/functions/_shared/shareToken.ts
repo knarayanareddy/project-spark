@@ -5,7 +5,7 @@ export function base64urlEncode(data: Uint8Array | string): string {
   } else {
     bytes = data;
   }
-  let base64 = btoa(String.fromCharCode(...bytes));
+  const base64 = btoa(String.fromCharCode(...bytes));
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 

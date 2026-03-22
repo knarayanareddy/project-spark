@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { X, Check, Globe, Shield, Zap, RefreshCw, Layers, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,13 +15,7 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
   const [isLoading, setIsLoading] = useState(false);
   const [config, setConfig] = useState<any>({});
 
-  useEffect(() => {
-    if (isOpen && provider) {
-      loadConfig();
-    }
-  }, [isOpen, provider]);
-
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async () => {
     setIsLoading(true);
     try {
       const existingConfig = await getConnectorConfig(provider);
@@ -43,14 +37,20 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [provider]);
+
+  useEffect(() => {
+    if (isOpen && provider) {
+      loadConfig();
+    }
+  }, [isOpen, provider, loadConfig]);
 
   if (!isOpen) return null;
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      let finalConfig = { ...config };
+      const finalConfig = { ...config };
       
       // Normalize RSS feeds
       if (provider === 'rss' && typeof config.feeds === 'string') {
@@ -71,7 +71,7 @@ export default function ConfigModal({ isOpen, onClose, title, provider }: any) {
   const handleTest = async () => {
     setIsTesting(true);
     try {
-      let testCfg = { ...config };
+      const testCfg = { ...config };
       if (provider === 'rss' && typeof config.feeds === 'string') {
         const urls = config.feeds.split('\n').map((l: string) => l.trim()).filter(Boolean);
         testCfg.feeds = urls.map((url: string) => ({ url }));

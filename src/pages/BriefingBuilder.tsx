@@ -65,6 +65,7 @@ export default function BriefingBuilder() {
       window.removeEventListener("storage_dev_mode", handleDevModeSync);
       window.removeEventListener("storage", handleDevModeSync);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, isDevMode]);
 
   async function checkSession() {
